@@ -11,7 +11,8 @@ import os
 import sys
 
 from fx_pulse.providers import get_provider
-from fx_pulse.storage import TickStore, tick_id_for
+from fx_pulse.signal import MACrossover
+from fx_pulse.storage import SignalStore, TickStore, tick_id_for
 
 
 def main() -> None:
@@ -23,12 +24,21 @@ def main() -> None:
 
     db_path = os.getenv("FX_PULSE_DB_PATH", "fx_pulse.db")
     print(f"Streaming AUD_USD → {db_path}  (Ctrl-C to stop)", flush=True)
+    crossover = MACrossover()
     try:
-        with TickStore.open(db_path) as store:
+        with TickStore.open(db_path) as ticks, SignalStore.open(db_path) as signals:
             for tick in provider.stream(["AUD_USD"]):
                 tid = tick_id_for(tick)
-                store.write(tick, tid)
-                print(f"{tid}  {tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}")
+                ticks.write(tick, tid)
+                signal = crossover.update(tick)
+                if signal is None:
+                    print(f"{tid}  {tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}  signal=warmup")
+                else:
+                    signals.write(signal)
+                    print(
+                        f"{tid}  {tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}  "
+                        f"signal={signal.label}  short={signal.short_ma:.5f}  long={signal.long_ma:.5f}"
+                    )
     except KeyboardInterrupt:
         print("\nStopped.")
 

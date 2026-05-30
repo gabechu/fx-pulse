@@ -1,10 +1,11 @@
-"""Offline tests for tick persistence — uses tmp_path, no network."""
+"""Offline tests for tick + signal persistence — uses tmp_path, no network."""
 from __future__ import annotations
 
 import sqlite3
 
 from fx_pulse.providers import Tick
-from fx_pulse.storage import TickStore, tick_id_for
+from fx_pulse.signal import Signal
+from fx_pulse.storage import SignalStore, TickStore, tick_id_for
 
 
 def test_open_creates_table_and_index(tmp_path):
@@ -19,8 +20,10 @@ def test_open_creates_table_and_index(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='index'"
         )}
     assert "ticks" in tables
+    assert "signals" in tables
     assert "idx_ticks_instrument_time" in indexes
     assert "idx_ticks_tick_id" in indexes
+    assert "idx_signals_instrument_time" in indexes
 
 
 def test_open_enables_wal_mode(tmp_path):
@@ -79,3 +82,60 @@ def test_write_dedupes_on_repeat_tick_id(tmp_path):
     with sqlite3.connect(db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
     assert count == 1
+
+
+def test_signal_store_persists_signal(tmp_path):
+    db = tmp_path / "ticks.db"
+    s = Signal(
+        instrument="AUD_USD",
+        time="2026-05-21T00:00:00Z",
+        short_ma=0.66012,
+        long_ma=0.66010,
+        label="long",
+    )
+    with SignalStore.open(str(db)) as store:
+        store.write(s)
+    with sqlite3.connect(db) as conn:
+        row = conn.execute(
+            "SELECT instrument, time, short_ma, long_ma, label FROM signals"
+        ).fetchone()
+    assert row == ("AUD_USD", "2026-05-21T00:00:00Z", 0.66012, 0.66010, "long")
+
+
+def test_signal_store_dedupes_on_instrument_time(tmp_path):
+    db = tmp_path / "ticks.db"
+    s = Signal(
+        instrument="AUD_USD",
+        time="2026-05-21T00:00:00Z",
+        short_ma=0.66012,
+        long_ma=0.66010,
+        label="long",
+    )
+    with SignalStore.open(str(db)) as store:
+        store.write(s)
+        store.write(s)
+    with sqlite3.connect(db) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    assert count == 1
+
+
+def test_tick_store_and_signal_store_share_db(tmp_path):
+    # Both stores point at the same file; opening one then the other must
+    # leave both tables intact (i.e. SignalStore.open doesn't clobber ticks).
+    db = tmp_path / "ticks.db"
+    t = Tick(instrument="AUD_USD", time="2026-05-21T00:00:00Z", bid=0.66012, ask=0.66016)
+    s = Signal(
+        instrument="AUD_USD",
+        time="2026-05-21T00:00:00Z",
+        short_ma=0.66014,
+        long_ma=0.66013,
+        label="long",
+    )
+    with TickStore.open(str(db)) as ticks, SignalStore.open(str(db)) as signals:
+        ticks.write(t, tick_id_for(t))
+        signals.write(s)
+    with sqlite3.connect(db) as conn:
+        tick_count = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
+        signal_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    assert tick_count == 1
+    assert signal_count == 1
