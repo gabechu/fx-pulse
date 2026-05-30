@@ -24,6 +24,10 @@ Tick off as we go. Ordering inside each section is rough priority.
 - [ ] **Store `time` as epoch micros alongside ISO string.** TEXT sorts correctly (ISO-8601-Z) but pandas/dashboard queries will re-parse repeatedly. Add an INTEGER column when the dashboard lands.
 - [ ] **Slim the streamer image.** `pandas` and `streamlit` are in app deps ([pyproject.toml:9-11](pyproject.toml#L9-L11)) but unused until Steps 4–5. Move them to a `dashboard` extra or a separate Docker stage.
 
+## Migrations
+
+- [ ] **Pre-migration dev DBs need stamping or wiping.** Any `data/fx_pulse.db` created before [fx_pulse/db.py](fx_pulse/db.py) landed has the `ticks` / `signals` tables but no `schema_version` row, so `apply_migrations` will try to re-run `001_ticks.sql` and fail on `CREATE TABLE ticks`. For dev: `rm data/fx_pulse.db` and let the next run rebuild. For future prod data we'd add a one-shot `stamp` command. Tracking here in case anyone hits it locally.
+
 ## Maintainability
 
 - [ ] **Centralise config.** Env reads are scattered: `OANDA_*` in [oanda.py:20-27](fx_pulse/providers/oanda.py#L20-L27), `FX_PULSE_PROVIDER` in [providers/__init__.py:20](fx_pulse/providers/__init__.py#L20), `FX_PULSE_DB_PATH` in [stream.py:24](fx_pulse/stream.py#L24). A small frozen `Settings` dataclass loaded once at startup makes "what env vars does this app need" a one-place answer — important for the planned SSM Parameter Store wiring.

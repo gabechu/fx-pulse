@@ -1,8 +1,8 @@
 """SQLite persistence for ticks and signals.
 
-Sits downstream of the provider layer and sees only the vendor-agnostic `Tick`
-plus the derived `Signal`. WAL mode lets a reader (e.g. dashboard) query
-while this process writes.
+Schema (tables, indexes, future column changes) lives in `fx_pulse/migrations/`
+and is applied by `fx_pulse.db.open_connection`. Stores here are thin DAOs:
+they know how to read/write their rows and nothing about DDL.
 """
 from __future__ import annotations
 
@@ -11,31 +11,9 @@ import sqlite3
 from types import TracebackType
 from typing import Optional, Type
 
+from fx_pulse.db import open_connection
 from fx_pulse.providers import Tick
 from fx_pulse.signal import Signal
-
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS ticks (
-    instrument TEXT NOT NULL,
-    time       TEXT NOT NULL,
-    bid        REAL NOT NULL,
-    ask        REAL NOT NULL,
-    tick_id    TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ticks_tick_id ON ticks(tick_id);
-CREATE INDEX IF NOT EXISTS idx_ticks_instrument_time ON ticks(instrument, time);
-
-CREATE TABLE IF NOT EXISTS signals (
-    instrument TEXT NOT NULL,
-    time       TEXT NOT NULL,
-    short_ma   REAL NOT NULL,
-    long_ma    REAL NOT NULL,
-    label      TEXT NOT NULL,
-    UNIQUE(instrument, time)
-);
-CREATE INDEX IF NOT EXISTS idx_signals_instrument_time ON signals(instrument, time);
-"""
 
 
 def tick_id_for(tick: Tick) -> str:
@@ -51,11 +29,7 @@ class TickStore:
 
     @classmethod
     def open(cls, path: str) -> "TickStore":
-        conn = sqlite3.connect(path, isolation_level=None)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.executescript(_SCHEMA)
-        return cls(conn)
+        return cls(open_connection(path))
 
     def write(self, tick: Tick, tick_id: str) -> None:
         self._conn.execute(
@@ -85,11 +59,7 @@ class SignalStore:
 
     @classmethod
     def open(cls, path: str) -> "SignalStore":
-        conn = sqlite3.connect(path, isolation_level=None)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.executescript(_SCHEMA)
-        return cls(conn)
+        return cls(open_connection(path))
 
     def write(self, signal: Signal) -> None:
         self._conn.execute(
