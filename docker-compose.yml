@@ -10,6 +10,28 @@ services:
       - ./data:/data
     restart: unless-stopped
 
+  dashboard:
+    build:
+      context: .
+      target: app
+    environment:
+      FX_PULSE_DB_PATH: /data/fx_pulse.db
+    volumes:
+      - ./data:/data
+    ports:
+      - "8501:8501"
+    command:
+      - uv
+      - run
+      - streamlit
+      - run
+      - fx_pulse/dashboard.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    restart: unless-stopped
+
   tests:
     build:
       context: .

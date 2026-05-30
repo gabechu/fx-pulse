@@ -41,8 +41,12 @@ Credentials are kept out of the image:
 ```
 fx_pulse/
   __init__.py
-  stream.py            # Step 2/3: live AUD/USD ticks → terminal + SQLite
-  storage.py           # Step 3: SQLite TickStore (WAL mode)
+  stream.py            # Step 2/3/4: ticks → terminal + SQLite + signal
+  storage.py           # Step 3/4: TickStore + SignalStore (WAL mode)
+  signal.py            # Step 4: MA crossover heuristic
+  dashboard.py         # Step 5: Streamlit dashboard
+  db.py                # Connection + forward-only migration runner
+  migrations/          # NNN_*.sql files, applied in version order
   providers/
     __init__.py        # get_provider() factory + Tick / TickStream re-exports
     base.py            # Tick dataclass + TickStream Protocol
@@ -76,6 +80,23 @@ Stop with `Ctrl-C` (or `docker compose down`). The DB persists on the host
 between runs. WAL crash-safety means the most you'll lose on abrupt
 shutdown is the in-flight tick.
 
+### Dashboard (Step 5)
+
+In another terminal, bring up the Streamlit dashboard:
+
+```bash
+docker compose up dashboard
+```
+
+Open <http://localhost:8501>. The dashboard shows the latest signal label,
+recent tick count, and a chart of mid-price with the short/long MAs overlaid.
+It auto-refreshes every 5 seconds.
+
+The dashboard reads the same `./data/fx_pulse.db` the streamer writes — WAL
+mode allows concurrent reads, and the dashboard connection enforces
+`PRAGMA query_only=ON` so it can never corrupt the file. You can start the
+streamer and dashboard in either order.
+
 ## How to test
 
 ```bash
@@ -106,8 +127,8 @@ No other code changes are needed.
 - [x] Step 1 — Foundation
 - [x] Step 2 — Stream live AUD/USD ticks to terminal
 - [x] Step 3 — Persist ticks to SQLite
-- [ ] Step 4 — First heuristic signal
-- [ ] Step 5 — Streamlit dashboard
+- [x] Step 4 — First heuristic signal
+- [x] Step 5 — Streamlit dashboard
 - [ ] Step 6 — Phone access (LAN / tunnel)
 
 ## Production-readiness backlog
