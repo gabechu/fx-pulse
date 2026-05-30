@@ -1,9 +1,8 @@
 """Streamlit dashboard for AUD/USD ticks + heuristic signal.
 
 Reads the same SQLite file the streamer writes (FX_PULSE_DB_PATH contract).
-Opens read-only by enforcement (PRAGMA query_only) rather than URI mode=ro,
-because SQLite WAL readers must still write the -shm sidecar — mode=ro forbids
-that and refuses to open WAL databases.
+Opens read-write but enforces PRAGMA query_only=ON — needed because SQLite
+WAL readers must still write the -shm sidecar, which mode=ro URI forbids.
 
 Run: `docker compose up dashboard` then open http://localhost:8501
 """
@@ -13,14 +12,25 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 DB_PATH = os.getenv("FX_PULSE_DB_PATH", "fx_pulse.db")
 INSTRUMENT = "AUD_USD"
-LOOKBACK_MINUTES = 60
 REFRESH_INTERVAL = "5s"
+
+# Maps the sidebar selector label to a timedelta. None = no time filter.
+LOOKBACK_OPTIONS: dict[str, Optional[timedelta]] = {
+    "1h": timedelta(hours=1),
+    "6h": timedelta(hours=6),
+    "1d": timedelta(days=1),
+    "1w": timedelta(weeks=1),
+    "30d": timedelta(days=30),
+    "all": None,
+}
 
 _LABEL_COLOR = {"long": "#16a34a", "flat": "#737373", "short": "#dc2626"}
 
@@ -31,16 +41,32 @@ def _open_readonly(path: str) -> sqlite3.Connection:
     return conn
 
 
-def _load_ticks(conn: sqlite3.Connection, since_iso: str) -> pd.DataFrame:
+def _load_ticks(conn: sqlite3.Connection, since_iso: Optional[str]) -> pd.DataFrame:
+    if since_iso is None:
+        return pd.read_sql_query(
+            "SELECT time, bid, ask, source FROM ticks WHERE instrument = ? ORDER BY time",
+            conn,
+            params=(INSTRUMENT,),
+            parse_dates=["time"],
+        )
     return pd.read_sql_query(
-        "SELECT time, bid, ask FROM ticks WHERE instrument = ? AND time >= ? ORDER BY time",
+        "SELECT time, bid, ask, source FROM ticks "
+        "WHERE instrument = ? AND time >= ? ORDER BY time",
         conn,
         params=(INSTRUMENT, since_iso),
         parse_dates=["time"],
     )
 
 
-def _load_signals(conn: sqlite3.Connection, since_iso: str) -> pd.DataFrame:
+def _load_signals(conn: sqlite3.Connection, since_iso: Optional[str]) -> pd.DataFrame:
+    if since_iso is None:
+        return pd.read_sql_query(
+            "SELECT time, short_ma, long_ma, label FROM signals "
+            "WHERE instrument = ? ORDER BY time",
+            conn,
+            params=(INSTRUMENT,),
+            parse_dates=["time"],
+        )
     return pd.read_sql_query(
         "SELECT time, short_ma, long_ma, label FROM signals "
         "WHERE instrument = ? AND time >= ? ORDER BY time",
@@ -52,7 +78,11 @@ def _load_signals(conn: sqlite3.Connection, since_iso: str) -> pd.DataFrame:
 
 st.set_page_config(page_title="fx-pulse", layout="wide")
 st.title(f"fx-pulse · {INSTRUMENT}")
-st.caption(f"Lookback: last {LOOKBACK_MINUTES} min · refreshes every {REFRESH_INTERVAL}")
+
+lookback = st.sidebar.selectbox(
+    "Lookback", list(LOOKBACK_OPTIONS.keys()), index=len(LOOKBACK_OPTIONS) - 1
+)
+st.caption(f"Lookback: {lookback} · refreshes every {REFRESH_INTERVAL}")
 
 
 @st.fragment(run_every=REFRESH_INTERVAL)
@@ -61,11 +91,15 @@ def render() -> None:
         st.warning(f"No DB at `{DB_PATH}` yet — waiting for the streamer to start.")
         return
 
-    since = (datetime.now(timezone.utc) - timedelta(minutes=LOOKBACK_MINUTES)).isoformat()
+    delta = LOOKBACK_OPTIONS[lookback]
+    since_iso = (
+        None if delta is None
+        else (datetime.now(timezone.utc) - delta).isoformat()
+    )
     conn = _open_readonly(DB_PATH)
     try:
-        ticks = _load_ticks(conn, since)
-        signals = _load_signals(conn, since)
+        ticks = _load_ticks(conn, since_iso)
+        signals = _load_signals(conn, since_iso)
     finally:
         conn.close()
 
@@ -79,23 +113,45 @@ def render() -> None:
             f"#### Signal\n# <span style='color:{color}'>{latest['label'].upper()}</span>",
             unsafe_allow_html=True,
         )
-    mid.metric(f"Ticks (last {LOOKBACK_MINUTES}m)", len(ticks))
-    if ticks.empty:
-        right.metric("Latest tick", "—")
-    else:
-        right.metric("Latest tick", ticks.iloc[-1]["time"].strftime("%H:%M:%SZ"))
 
     if ticks.empty:
-        st.info("No ticks in the lookback window yet.")
+        mid.metric("Rows", 0)
+        right.metric("Latest", "—")
+        st.info(f"No ticks in the `{lookback}` window.")
         return
 
+    by_source = ticks["source"].value_counts().to_dict()
+    breakdown = " · ".join(f"{k}: {v}" for k, v in sorted(by_source.items()))
+    mid.metric("Rows", f"{len(ticks)}", help=breakdown)
+    right.metric("Latest", ticks.iloc[-1]["time"].strftime("%Y-%m-%d %H:%M:%SZ"))
+
     ticks["mid"] = (ticks["bid"] + ticks["ask"]) / 2.0
-    chart = ticks.set_index("time")[["mid"]]
+    chart_df = ticks.assign(
+        live=ticks["mid"].where(ticks["source"] == "live"),
+        backfill=ticks["mid"].where(ticks["source"] == "candle"),
+    ).set_index("time")[["live", "backfill"]]
     if not signals.empty:
-        chart = chart.join(
+        chart_df = chart_df.join(
             signals.set_index("time")[["short_ma", "long_ma"]], how="outer"
         )
-    st.line_chart(chart)
+
+    # st.line_chart forces y through zero, which flattens FX prices into a
+    # straight line. Altair with scale=zero=False auto-fits to the data range.
+    long_df = (
+        chart_df.reset_index()
+        .melt("time", var_name="series", value_name="price")
+        .dropna(subset=["price"])
+    )
+    chart = (
+        alt.Chart(long_df)
+        .mark_line()
+        .encode(
+            x=alt.X("time:T", title=None),
+            y=alt.Y("price:Q", title=None, scale=alt.Scale(zero=False)),
+            color=alt.Color("series:N", title=None),
+        )
+    )
+    st.altair_chart(chart, width="stretch")
 
 
 render()
