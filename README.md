@@ -8,9 +8,10 @@ The data layer is vendor-agnostic — see [Swapping data providers](#swapping-da
 
 ## Prerequisites
 
-- Python 3.10+
-- [uv](https://docs.astral.sh/uv/) (`brew install uv`)
+- [Docker](https://docs.docker.com/get-docker/) with Compose v2
 - An OANDA account (free **practice** account is fine for development)
+
+Everything runs in Docker — no host Python or `uv` install needed.
 
 ### Get an OANDA API token (one-time)
 
@@ -20,17 +21,27 @@ The data layer is vendor-agnostic — see [Swapping data providers](#swapping-da
 
 ## Setup
 
-```bash
-uv sync
+Create a `.env` file in the repo root (already gitignored, never copied into the image):
+
+```
+OANDA_API_TOKEN=your-token-here
+OANDA_ACCOUNT_ID=XXX-XXX-XXXXXXXX-XXX
+OANDA_ENV=practice
 ```
 
-This creates `.venv/` and installs locked dependencies.
+Use `OANDA_ENV=live` only when connecting to a funded live account.
+
+Credentials are kept out of the image:
+- `.env` is in [.dockerignore](.dockerignore) so it isn't part of the build context.
+- The `Dockerfile` never `COPY`s `.env` and never sets `ENV OANDA_*`.
+- `docker compose` injects them into the running container via `env_file`, so the token only exists in process environment, not in any image layer.
 
 ## Project layout
 
 ```
 fx_pulse/
   __init__.py
+  stream.py            # Step 2: live AUD/USD ticks → terminal
   providers/
     __init__.py        # get_provider() factory + Tick / TickStream re-exports
     base.py            # Tick dataclass + TickStream Protocol
@@ -38,6 +49,31 @@ fx_pulse/
 tests/                 # offline smoke tests — no network
 pyproject.toml         # deps + project metadata
 ```
+
+## How to run
+
+Stream live AUD/USD ticks:
+
+```bash
+docker compose up --build
+```
+
+You should see prices as they tick like:
+`2026-05-20T...Z  bid=0.66012  ask=0.66016`
+
+Stop with `Ctrl-C` (or `docker compose down`).
+
+## How to test
+
+```bash
+docker compose run --rm tests
+```
+
+This builds the `dev` stage of the [Dockerfile](Dockerfile) (which includes
+`pytest` and the `tests/` directory) and runs the suite in a throwaway
+container. Tests in `tests/` are offline — they exercise the provider layer
+(Tick, Protocol conformance, env-var validation, factory error paths) without
+contacting any vendor.
 
 ## Swapping data providers
 
@@ -55,7 +91,7 @@ No other code changes are needed.
 ## Roadmap (one step per commit)
 
 - [x] Step 1 — Foundation
-- [ ] Step 2 — Stream live AUD/USD ticks to terminal
+- [x] Step 2 — Stream live AUD/USD ticks to terminal
 - [ ] Step 3 — Persist ticks to SQLite
 - [ ] Step 4 — First heuristic signal
 - [ ] Step 5 — Streamlit dashboard
