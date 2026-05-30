@@ -29,7 +29,7 @@ def main() -> None:
         with TickStore.open(db_path) as ticks, SignalStore.open(db_path) as signals:
             for tick in provider.stream(["AUD_USD"]):
                 tid = tick_id_for(tick)
-                ticks.write(tick, tid)
+                ticks.write(tick, tid, source="live")
                 signal = crossover.update(tick)
                 if signal is None:
                     print(f"{tid}  {tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}  signal=warmup")

@@ -31,11 +31,11 @@ class TickStore:
     def open(cls, path: str) -> "TickStore":
         return cls(open_connection(path))
 
-    def write(self, tick: Tick, tick_id: str) -> None:
+    def write(self, tick: Tick, tick_id: str, source: str) -> None:
         self._conn.execute(
-            "INSERT OR IGNORE INTO ticks (instrument, time, bid, ask, tick_id) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (tick.instrument, tick.time, tick.bid, tick.ask, tick_id),
+            "INSERT OR IGNORE INTO ticks (instrument, time, bid, ask, tick_id, source) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (tick.instrument, tick.time, tick.bid, tick.ask, tick_id, source),
         )
 
     def close(self) -> None:

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import os
 
-from fx_pulse.providers.base import TickStream, Tick
+from fx_pulse.providers.base import HistoricalSource, Tick, TickStream
 
-__all__ = ["TickStream", "Tick", "get_provider"]
+__all__ = ["TickStream", "HistoricalSource", "Tick", "get_provider", "get_historical"]
 
 
 def get_provider() -> TickStream:
@@ -21,4 +21,12 @@ def get_provider() -> TickStream:
     if name == "oanda":
         from fx_pulse.providers.oanda import OandaTickStream
         return OandaTickStream.from_env()
+    raise ValueError(f"unknown FX_PULSE_PROVIDER: {name!r}")
+
+
+def get_historical() -> HistoricalSource:
+    name = os.getenv("FX_PULSE_PROVIDER", "oanda").lower()
+    if name == "oanda":
+        from fx_pulse.providers.oanda import OandaHistory
+        return OandaHistory.from_env()
     raise ValueError(f"unknown FX_PULSE_PROVIDER: {name!r}")

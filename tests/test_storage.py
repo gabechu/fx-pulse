@@ -39,7 +39,7 @@ def test_write_persists_tick(tmp_path):
     db = tmp_path / "ticks.db"
     t = Tick(instrument="AUD_USD", time="2026-05-21T00:00:00Z", bid=0.66012, ask=0.66016)
     with TickStore.open(str(db)) as store:
-        store.write(t, tick_id_for(t))
+        store.write(t, tick_id_for(t), source="live")
     with sqlite3.connect(db) as conn:
         row = conn.execute(
             "SELECT instrument, time, bid, ask FROM ticks"
@@ -60,7 +60,7 @@ def test_write_preserves_insertion_order_across_session(tmp_path):
     ]
     with TickStore.open(str(db)) as store:
         for t in ticks:
-            store.write(t, tick_id_for(t))
+            store.write(t, tick_id_for(t), source="live")
     with sqlite3.connect(db) as conn:
         rows = conn.execute(
             "SELECT time FROM ticks ORDER BY time"
@@ -77,8 +77,8 @@ def test_write_dedupes_on_repeat_tick_id(tmp_path):
     t = Tick(instrument="AUD_USD", time="2026-05-21T00:00:00Z", bid=0.66012, ask=0.66016)
     tid = tick_id_for(t)
     with TickStore.open(str(db)) as store:
-        store.write(t, tid)
-        store.write(t, tid)
+        store.write(t, tid, source="live")
+        store.write(t, tid, source="live")
     with sqlite3.connect(db) as conn:
         count = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
     assert count == 1
@@ -132,7 +132,7 @@ def test_tick_store_and_signal_store_share_db(tmp_path):
         label="long",
     )
     with TickStore.open(str(db)) as ticks, SignalStore.open(str(db)) as signals:
-        ticks.write(t, tick_id_for(t))
+        ticks.write(t, tick_id_for(t), source="live")
         signals.write(s)
     with sqlite3.connect(db) as conn:
         tick_count = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]

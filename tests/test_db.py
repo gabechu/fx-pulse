@@ -26,8 +26,8 @@ def test_apply_migrations_records_each_applied_version(tmp_path):
         versions = sorted(
             row[0] for row in conn.execute("SELECT version FROM schema_version")
         )
-    # 001_ticks.sql + 002_signals.sql shipped today; new files extend this.
-    assert versions == [1, 2]
+    # 001_ticks.sql + 002_signals.sql + 003_tick_source.sql; new files extend this.
+    assert versions == [1, 2, 3]
 
 
 def test_apply_migrations_is_idempotent(tmp_path):
@@ -37,7 +37,7 @@ def test_apply_migrations_is_idempotent(tmp_path):
     apply_migrations(p)
     with sqlite3.connect(p) as conn:
         count = conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
-    assert count == 2  # one row per applied version, no duplicates
+    assert count == 3  # one row per applied version, no duplicates
 
 
 def test_open_connection_enables_wal_and_applies_schema(tmp_path):

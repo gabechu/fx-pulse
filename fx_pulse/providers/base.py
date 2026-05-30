@@ -20,3 +20,10 @@ class Tick:
 @runtime_checkable
 class TickStream(Protocol):
     def stream(self, instruments: Iterable[str]) -> Iterator[Tick]: ...
+
+
+@runtime_checkable
+class HistoricalSource(Protocol):
+    def fetch(
+        self, instrument: str, start: str, end: str, granularity: str
+    ) -> Iterator[Tick]: ...
