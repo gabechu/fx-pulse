@@ -1,14 +1,17 @@
-"""Stream live AUD/USD prices to terminal.
+"""Stream live AUD/USD prices to terminal and persist to SQLite.
 
-Run inside Docker: `docker compose up --build`
+Run: `uv run --env-file .env python -m fx_pulse.stream`
 
 Vendor selection is via the `FX_PULSE_PROVIDER` env var (default "oanda").
+DB path is via `FX_PULSE_DB_PATH` (default "fx_pulse.db").
 """
 from __future__ import annotations
 
+import os
 import sys
 
 from fx_pulse.providers import get_provider
+from fx_pulse.storage import TickStore, tick_id_for
 
 
 def main() -> None:
@@ -18,10 +21,14 @@ def main() -> None:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("Streaming AUD_USD  (Ctrl-C to stop)", flush=True)
+    db_path = os.getenv("FX_PULSE_DB_PATH", "fx_pulse.db")
+    print(f"Streaming AUD_USD → {db_path}  (Ctrl-C to stop)", flush=True)
     try:
-        for tick in provider.stream(["AUD_USD"]):
-            print(f"{tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}")
+        with TickStore.open(db_path) as store:
+            for tick in provider.stream(["AUD_USD"]):
+                tid = tick_id_for(tick)
+                store.write(tick, tid)
+                print(f"{tid}  {tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}")
     except KeyboardInterrupt:
         print("\nStopped.")
 

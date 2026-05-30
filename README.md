@@ -41,7 +41,8 @@ Credentials are kept out of the image:
 ```
 fx_pulse/
   __init__.py
-  stream.py            # Step 2: live AUD/USD ticks → terminal
+  stream.py            # Step 2/3: live AUD/USD ticks → terminal + SQLite
+  storage.py           # Step 3: SQLite TickStore (WAL mode)
   providers/
     __init__.py        # get_provider() factory + Tick / TickStream re-exports
     base.py            # Tick dataclass + TickStream Protocol
@@ -52,7 +53,7 @@ pyproject.toml         # deps + project metadata
 
 ## How to run
 
-Stream live AUD/USD ticks:
+Stream live AUD/USD ticks (Steps 2–3):
 
 ```bash
 docker compose up --build
@@ -61,7 +62,19 @@ docker compose up --build
 You should see prices as they tick like:
 `2026-05-20T...Z  bid=0.66012  ask=0.66016`
 
-Stop with `Ctrl-C` (or `docker compose down`).
+Ticks are written to `./data/fx_pulse.db` on the host (bind-mounted to `/data`
+inside the container). WAL mode is enabled so a reader (e.g. the upcoming
+Streamlit dashboard) can query the same file while the stream is running.
+
+In another terminal, confirm ticks are landing:
+
+```bash
+sqlite3 ./data/fx_pulse.db "SELECT COUNT(*), MAX(time) FROM ticks;"
+```
+
+Stop with `Ctrl-C` (or `docker compose down`). The DB persists on the host
+between runs. WAL crash-safety means the most you'll lose on abrupt
+shutdown is the in-flight tick.
 
 ## How to test
 
@@ -92,7 +105,14 @@ No other code changes are needed.
 
 - [x] Step 1 — Foundation
 - [x] Step 2 — Stream live AUD/USD ticks to terminal
-- [ ] Step 3 — Persist ticks to SQLite
+- [x] Step 3 — Persist ticks to SQLite
 - [ ] Step 4 — First heuristic signal
 - [ ] Step 5 — Streamlit dashboard
 - [ ] Step 6 — Phone access (LAN / tunnel)
+
+## Production-readiness backlog
+
+The roadmap above is *what the app does*. Separately, [BACKLOG.md](BACKLOG.md)
+tracks *what it needs before running unattended in ECS* — reconnect/backoff,
+structured logging, SIGTERM handling, healthchecks, config consolidation, etc.
+Work through it as we go.
