@@ -10,40 +10,65 @@ from __future__ import annotations
 import os
 import sys
 
+from fx_pulse.obs import Metrics, get_logger, touch_liveness
 from fx_pulse.providers import get_provider
 from fx_pulse.signal import MACrossover
 from fx_pulse.storage import SignalStore, TickStore, tick_id_for
+
+log = get_logger("fx_pulse.stream")
 
 
 def main() -> None:
     try:
         provider = get_provider()
     except (RuntimeError, ValueError) as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+        log.error("provider init failed", extra={"error": str(e)})
         sys.exit(1)
 
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
-        print("ERROR: DATABASE_URL is not set", file=sys.stderr)
+        log.error("DATABASE_URL is not set")
         sys.exit(1)
-    print("Streaming AUD_USD  (Ctrl-C to stop)", flush=True)
+    log.info("streaming starting", extra={"instrument": "AUD_USD"})
+    metrics = Metrics(logger=log)
     crossover = MACrossover()
     try:
         with TickStore.open(dsn) as ticks, SignalStore.open(dsn) as signals:
             for tick in provider.stream(["AUD_USD"]):
                 tid = tick_id_for(tick)
                 ticks.write(tick, tid, source="live")
+                touch_liveness()
                 signal = crossover.update(tick)
+                metrics.record_tick(tick.time)
                 if signal is None:
-                    print(f"{tid}  {tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}  signal=warmup")
+                    log.info(
+                        "tick",
+                        extra={
+                            "instrument": tick.instrument,
+                            "time": tick.time,
+                            "bid": tick.bid,
+                            "ask": tick.ask,
+                            "signal": "warmup",
+                        },
+                    )
                 else:
                     signals.write(signal)
-                    print(
-                        f"{tid}  {tick.time}  bid={tick.bid:.5f}  ask={tick.ask:.5f}  "
-                        f"signal={signal.label}  short={signal.short_ma:.5f}  long={signal.long_ma:.5f}"
+                    log.info(
+                        "tick",
+                        extra={
+                            "instrument": tick.instrument,
+                            "time": tick.time,
+                            "bid": tick.bid,
+                            "ask": tick.ask,
+                            "signal": signal.label,
+                            "short_ma": signal.short_ma,
+                            "long_ma": signal.long_ma,
+                        },
                     )
+                metrics.maybe_flush()
     except KeyboardInterrupt:
-        print("\nStopped.")
+        metrics.flush()
+        log.info("stopped")
 
 
 if __name__ == "__main__":

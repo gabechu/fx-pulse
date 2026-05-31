@@ -18,6 +18,7 @@ import argparse
 import os
 import sys
 
+from fx_pulse.obs import get_logger
 from fx_pulse.providers import get_historical
 from fx_pulse.storage import TickStore, tick_id_for
 
@@ -25,23 +26,29 @@ _PROGRESS_EVERY = 1000
 # One transaction per OANDA page; amortises the commit/fsync over the batch.
 _BATCH_SIZE = 5000
 
+log = get_logger("fx_pulse.backfill")
+
 
 def main() -> None:
     args = _parse_args()
     try:
         source = get_historical()
     except (RuntimeError, ValueError) as e:
-        print(f"ERROR: {e}", file=sys.stderr)
+        log.error("provider init failed", extra={"error": str(e)})
         sys.exit(1)
 
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
-        print("ERROR: DATABASE_URL is not set", file=sys.stderr)
+        log.error("DATABASE_URL is not set")
         sys.exit(1)
-    print(
-        f"Backfilling {args.instrument} {args.granularity} "
-        f"[{args.start} → {args.end}]",
-        flush=True,
+    log.info(
+        "backfill starting",
+        extra={
+            "instrument": args.instrument,
+            "granularity": args.granularity,
+            "from": args.start,
+            "to": args.end,
+        },
     )
     written = 0
     with TickStore.open(dsn) as ticks:
@@ -59,15 +66,18 @@ def main() -> None:
                     ticks.begin()
                     in_batch = 0
                 if written % _PROGRESS_EVERY == 0:
-                    print(f"  …{written} candles (last={tick.time})", flush=True)
+                    log.info(
+                        "backfill progress",
+                        extra={"written": written, "last": tick.time},
+                    )
             ticks.commit()
         except KeyboardInterrupt:
-            ticks.commit()  # keep what we have; INSERT OR IGNORE makes restart cheap
-            print("\nInterrupted.", file=sys.stderr)
+            ticks.commit()  # keep what we have; ON CONFLICT makes restart cheap
+            log.warning("backfill interrupted", extra={"written": written})
         except BaseException:
             ticks.rollback()
             raise
-    print(f"Done. Wrote {written} rows.")
+    log.info("backfill done", extra={"written": written})
 
 
 def _parse_args() -> argparse.Namespace:

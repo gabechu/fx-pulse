@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Iterator
@@ -13,7 +12,10 @@ from oandapyV20.endpoints.instruments import InstrumentsCandles
 from oandapyV20.endpoints.pricing import PricingStream
 from oandapyV20.exceptions import V20Error
 
+from fx_pulse.obs import get_logger
 from fx_pulse.providers.base import Tick
+
+log = get_logger("fx_pulse.providers.oanda")
 
 # OANDA candle granularities → seconds. W and M (month) intentionally omitted
 # (irregular durations; add when a caller actually needs them).
@@ -107,10 +109,9 @@ class OandaHistory:
             request = InstrumentsCandles(instrument=instrument, params=params)
             candles = self._request_with_retry(request).get("candles", [])
             if not candles:
-                print(
-                    f"WARNING: OANDA returned no candles from "
-                    f"{_format_oanda_time(cursor)} (weekend gap or possible outage)",
-                    file=sys.stderr,
+                log.warning(
+                    "OANDA returned no candles (weekend gap or upstream outage)",
+                    extra={"from": _format_oanda_time(cursor)},
                 )
                 return
             last_complete: datetime | None = None
@@ -141,10 +142,9 @@ class OandaHistory:
                 if attempt + 1 == _MAX_RETRIES or not _is_retryable(exc):
                     raise
                 delay = _RETRY_BASE_SECONDS * (2 ** attempt)
-                print(
-                    f"WARNING: OANDA request failed ({exc!r}); "
-                    f"retrying in {delay:.0f}s",
-                    file=sys.stderr,
+                log.warning(
+                    "OANDA request failed; retrying",
+                    extra={"error": repr(exc), "delay_s": round(delay, 1), "attempt": attempt + 1},
                 )
                 time.sleep(delay)
         raise RuntimeError("unreachable")  # pragma: no cover

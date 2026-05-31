@@ -14,9 +14,9 @@ Tick off as we go. Ordering inside each section is rough priority.
 
 ## Observability
 
-- [ ] **Replace `print()` with structured logging.** [stream.py:21,25,31,33](fx_pulse/stream.py#L21). In CloudWatch, `print` output is unsearchable text — no levels, no fields, no timestamps. JSON logger with `level / msg / instrument / bid / ask / lag_ms` unlocks metric filters and queries.
-- [ ] **Periodic metrics summary.** Ticks/sec, reconnects, write errors, publish lag (`now - tick.time`). A periodic INFO line ("last 60s: 142 ticks, 0 reconnects, p50 lag 230ms") catches most incidents without standing up a metrics backend.
-- [ ] **Liveness signal for ECS.** Touch a sentinel file after each successful write; healthcheck = "file mtime within last N seconds." Avoids opening a port.
+- [x] **Replace `print()` with structured logging.** JSON-to-stdout in [fx_pulse/obs.py](fx_pulse/obs.py); used by `stream`, `backfill`, and the OANDA provider.
+- [x] **Periodic metrics summary.** `Metrics` in [obs.py](fx_pulse/obs.py) accumulates ticks / reconnects / write errors / lag (avg+max ms) and flushes an INFO line every 60s. The `record_reconnect()` hook is wired ahead of the reconnect/backoff work.
+- [x] **Liveness signal for ECS.** `touch_liveness()` in [obs.py](fx_pulse/obs.py); opt-in via `LIVENESS_FILE` env var, called after each successful tick write in [stream.py](fx_pulse/stream.py).
 
 ## Scalability
 
