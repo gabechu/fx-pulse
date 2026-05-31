@@ -1,24 +1,23 @@
 """Streamlit dashboard for AUD/USD ticks + heuristic signal.
 
-Reads the same SQLite file the streamer writes (FX_PULSE_DB_PATH contract).
-Opens read-write but enforces PRAGMA query_only=ON — needed because SQLite
-WAL readers must still write the -shm sidecar, which mode=ro URI forbids.
+Reads the same Postgres the streamer writes to. Postgres MVCC means readers
+never block writers, so backfill/stream/dashboard can all run concurrently
+without coordination.
 
 Run: `docker compose up dashboard` then open http://localhost:8501
 """
 from __future__ import annotations
 
 import os
-import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
 import altair as alt
 import pandas as pd
+import psycopg
 import streamlit as st
 
-DB_PATH = os.getenv("FX_PULSE_DB_PATH", "fx_pulse.db")
+DSN = os.environ.get("DATABASE_URL", "")
 INSTRUMENT = "AUD_USD"
 REFRESH_INTERVAL = "5s"
 
@@ -35,44 +34,34 @@ LOOKBACK_OPTIONS: dict[str, Optional[timedelta]] = {
 _LABEL_COLOR = {"long": "#16a34a", "flat": "#737373", "short": "#dc2626"}
 
 
-def _open_readonly(path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
-    conn.execute("PRAGMA query_only=ON")
-    return conn
-
-
-def _load_ticks(conn: sqlite3.Connection, since_iso: Optional[str]) -> pd.DataFrame:
-    if since_iso is None:
+def _load_ticks(conn: psycopg.Connection, since: Optional[datetime]) -> pd.DataFrame:
+    if since is None:
         return pd.read_sql_query(
-            "SELECT time, bid, ask, source FROM ticks WHERE instrument = ? ORDER BY time",
+            "SELECT time, bid, ask, source FROM ticks WHERE instrument = %s ORDER BY time",
             conn,
             params=(INSTRUMENT,),
-            parse_dates=["time"],
         )
     return pd.read_sql_query(
         "SELECT time, bid, ask, source FROM ticks "
-        "WHERE instrument = ? AND time >= ? ORDER BY time",
+        "WHERE instrument = %s AND time >= %s ORDER BY time",
         conn,
-        params=(INSTRUMENT, since_iso),
-        parse_dates=["time"],
+        params=(INSTRUMENT, since),
     )
 
 
-def _load_signals(conn: sqlite3.Connection, since_iso: Optional[str]) -> pd.DataFrame:
-    if since_iso is None:
+def _load_signals(conn: psycopg.Connection, since: Optional[datetime]) -> pd.DataFrame:
+    if since is None:
         return pd.read_sql_query(
             "SELECT time, short_ma, long_ma, label FROM signals "
-            "WHERE instrument = ? ORDER BY time",
+            "WHERE instrument = %s ORDER BY time",
             conn,
             params=(INSTRUMENT,),
-            parse_dates=["time"],
         )
     return pd.read_sql_query(
         "SELECT time, short_ma, long_ma, label FROM signals "
-        "WHERE instrument = ? AND time >= ? ORDER BY time",
+        "WHERE instrument = %s AND time >= %s ORDER BY time",
         conn,
-        params=(INSTRUMENT, since_iso),
-        parse_dates=["time"],
+        params=(INSTRUMENT, since),
     )
 
 
@@ -87,19 +76,20 @@ st.caption(f"Lookback: {lookback} · refreshes every {REFRESH_INTERVAL}")
 
 @st.fragment(run_every=REFRESH_INTERVAL)
 def render() -> None:
-    if not Path(DB_PATH).exists():
-        st.warning(f"No DB at `{DB_PATH}` yet — waiting for the streamer to start.")
+    if not DSN:
+        st.warning("DATABASE_URL is not set.")
         return
 
     delta = LOOKBACK_OPTIONS[lookback]
-    since_iso = (
-        None if delta is None
-        else (datetime.now(timezone.utc) - delta).isoformat()
-    )
-    conn = _open_readonly(DB_PATH)
+    since = None if delta is None else datetime.now(timezone.utc) - delta
     try:
-        ticks = _load_ticks(conn, since_iso)
-        signals = _load_signals(conn, since_iso)
+        conn = psycopg.connect(DSN)
+    except psycopg.OperationalError as e:
+        st.warning(f"Can't reach Postgres yet: {e}")
+        return
+    try:
+        ticks = _load_ticks(conn, since)
+        signals = _load_signals(conn, since)
     finally:
         conn.close()
 

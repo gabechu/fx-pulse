@@ -1,15 +1,20 @@
-"""SQLite persistence for ticks and signals.
+"""Postgres persistence for ticks and signals.
 
 Schema (tables, indexes, future column changes) lives in `fx_pulse/migrations/`
 and is applied by `fx_pulse.db.open_connection`. Stores here are thin DAOs:
 they know how to read/write their rows and nothing about DDL.
+
+Connection is opened in autocommit mode, so a bare `.write()` is durable
+immediately. Backfill wraps a sequence of writes in `begin()`/`commit()` to
+amortise round-trips into one transaction per page.
 """
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 from types import TracebackType
 from typing import Optional, Type
+
+import psycopg
 
 from fx_pulse.db import open_connection
 from fx_pulse.providers import Tick
@@ -24,19 +29,29 @@ def tick_id_for(tick: Tick) -> str:
 
 
 class TickStore:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: psycopg.Connection) -> None:
         self._conn = conn
 
     @classmethod
-    def open(cls, path: str) -> "TickStore":
-        return cls(open_connection(path))
+    def open(cls, dsn: str) -> "TickStore":
+        return cls(open_connection(dsn))
 
     def write(self, tick: Tick, tick_id: str, source: str) -> None:
         self._conn.execute(
-            "INSERT OR IGNORE INTO ticks (instrument, time, bid, ask, tick_id, source) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO ticks (instrument, time, bid, ask, tick_id, source) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (tick_id) DO NOTHING",
             (tick.instrument, tick.time, tick.bid, tick.ask, tick_id, source),
         )
+
+    def begin(self) -> None:
+        self._conn.execute("BEGIN")
+
+    def commit(self) -> None:
+        self._conn.execute("COMMIT")
+
+    def rollback(self) -> None:
+        self._conn.execute("ROLLBACK")
 
     def close(self) -> None:
         self._conn.close()
@@ -54,17 +69,19 @@ class TickStore:
 
 
 class SignalStore:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: psycopg.Connection) -> None:
         self._conn = conn
 
     @classmethod
-    def open(cls, path: str) -> "SignalStore":
-        return cls(open_connection(path))
+    def open(cls, dsn: str) -> "SignalStore":
+        return cls(open_connection(dsn))
 
     def write(self, signal: Signal) -> None:
         self._conn.execute(
-            "INSERT OR IGNORE INTO signals "
-            "(instrument, time, short_ma, long_ma, label) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO signals "
+            "(instrument, time, short_ma, long_ma, label) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (instrument, time) DO NOTHING",
             (
                 signal.instrument,
                 signal.time,

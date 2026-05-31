@@ -1,8 +1,8 @@
 CREATE TABLE signals (
     instrument TEXT NOT NULL,
-    time       TEXT NOT NULL,
-    short_ma   REAL NOT NULL,
-    long_ma    REAL NOT NULL,
+    time       TIMESTAMPTZ NOT NULL,
+    short_ma   DOUBLE PRECISION NOT NULL,
+    long_ma    DOUBLE PRECISION NOT NULL,
     label      TEXT NOT NULL,
     UNIQUE(instrument, time)
 );

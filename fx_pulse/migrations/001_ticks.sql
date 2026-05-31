@@ -1,8 +1,8 @@
 CREATE TABLE ticks (
     instrument TEXT NOT NULL,
-    time       TEXT NOT NULL,
-    bid        REAL NOT NULL,
-    ask        REAL NOT NULL,
+    time       TIMESTAMPTZ NOT NULL,
+    bid        DOUBLE PRECISION NOT NULL,
+    ask        DOUBLE PRECISION NOT NULL,
     tick_id    TEXT NOT NULL
 );
 CREATE UNIQUE INDEX idx_ticks_tick_id ON ticks(tick_id);

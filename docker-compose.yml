@@ -1,13 +1,29 @@
 services:
-  streamer:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fx_pulse
+      POSTGRES_PASSWORD: fx_pulse
+      POSTGRES_DB: fx_pulse
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fx_pulse -d fx_pulse"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  app:
     build:
       context: .
       target: app
     env_file: .env
     environment:
-      FX_PULSE_DB_PATH: /data/fx_pulse.db
-    volumes:
-      - ./data:/data
+      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   dashboard:
@@ -15,9 +31,10 @@ services:
       context: .
       target: app
     environment:
-      FX_PULSE_DB_PATH: /data/fx_pulse.db
-    volumes:
-      - ./data:/data
+      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8501:8501"
     command:
@@ -36,4 +53,12 @@ services:
     build:
       context: .
       target: dev
+    environment:
+      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
+    depends_on:
+      postgres:
+        condition: service_healthy
     profiles: ["test"]
+
+volumes:
+  pgdata:

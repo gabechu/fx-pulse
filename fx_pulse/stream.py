@@ -1,9 +1,9 @@
-"""Stream live AUD/USD prices to terminal and persist to SQLite.
+"""Stream live AUD/USD prices to terminal and persist to Postgres.
 
 Run: `uv run --env-file .env python -m fx_pulse.stream`
 
 Vendor selection is via the `FX_PULSE_PROVIDER` env var (default "oanda").
-DB path is via `FX_PULSE_DB_PATH` (default "fx_pulse.db").
+DB target is via `DATABASE_URL` (libpq URI).
 """
 from __future__ import annotations
 
@@ -22,11 +22,14 @@ def main() -> None:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
-    db_path = os.getenv("FX_PULSE_DB_PATH", "fx_pulse.db")
-    print(f"Streaming AUD_USD → {db_path}  (Ctrl-C to stop)", flush=True)
+    dsn = os.environ.get("DATABASE_URL")
+    if not dsn:
+        print("ERROR: DATABASE_URL is not set", file=sys.stderr)
+        sys.exit(1)
+    print("Streaming AUD_USD  (Ctrl-C to stop)", flush=True)
     crossover = MACrossover()
     try:
-        with TickStore.open(db_path) as ticks, SignalStore.open(db_path) as signals:
+        with TickStore.open(dsn) as ticks, SignalStore.open(dsn) as signals:
             for tick in provider.stream(["AUD_USD"]):
                 tid = tick_id_for(tick)
                 ticks.write(tick, tid, source="live")

@@ -41,8 +41,8 @@ Credentials are kept out of the image:
 ```
 fx_pulse/
   __init__.py
-  stream.py            # Step 2/3/4: ticks → terminal + SQLite + signal
-  storage.py           # Step 3/4: TickStore + SignalStore (WAL mode)
+  stream.py            # Step 2/3/4: ticks → terminal + Postgres + signal
+  storage.py           # Step 3/4: TickStore + SignalStore
   signal.py            # Step 4: MA crossover heuristic
   dashboard.py         # Step 5: Streamlit dashboard
   db.py                # Connection + forward-only migration runner
@@ -66,19 +66,19 @@ docker compose up --build
 You should see prices as they tick like:
 `2026-05-20T...Z  bid=0.66012  ask=0.66016`
 
-Ticks are written to `./data/fx_pulse.db` on the host (bind-mounted to `/data`
-inside the container). WAL mode is enabled so a reader (e.g. the upcoming
-Streamlit dashboard) can query the same file while the stream is running.
+Ticks are written to a Postgres 16 container managed by compose (data persists
+in the `pgdata` named volume). Postgres MVCC means concurrent readers (the
+dashboard, ad-hoc `psql`) never block writers.
 
 In another terminal, confirm ticks are landing:
 
 ```bash
-sqlite3 ./data/fx_pulse.db "SELECT COUNT(*), MAX(time) FROM ticks;"
+docker compose exec postgres psql -U fx_pulse -d fx_pulse \
+    -c "SELECT COUNT(*), MAX(time) FROM ticks;"
 ```
 
-Stop with `Ctrl-C` (or `docker compose down`). The DB persists on the host
-between runs. WAL crash-safety means the most you'll lose on abrupt
-shutdown is the in-flight tick.
+Stop with `Ctrl-C` (or `docker compose down`). Postgres persists between
+runs via the named volume; `docker compose down -v` wipes it.
 
 ### Dashboard (Step 5)
 
@@ -92,10 +92,10 @@ Open <http://localhost:8501>. The dashboard shows the latest signal label,
 recent tick count, and a chart of mid-price with the short/long MAs overlaid.
 It auto-refreshes every 5 seconds.
 
-The dashboard reads the same `./data/fx_pulse.db` the streamer writes — WAL
-mode allows concurrent reads, and the dashboard connection enforces
-`PRAGMA query_only=ON` so it can never corrupt the file. You can start the
-streamer and dashboard in either order.
+The dashboard reads the same Postgres the streamer writes to. MVCC lets the
+dashboard query freely while backfill and the live streamer are writing — no
+locking, no coordination. You can start the streamer and dashboard in either
+order.
 
 ## How to test
 
@@ -126,7 +126,7 @@ No other code changes are needed.
 
 - [x] Step 1 — Foundation
 - [x] Step 2 — Stream live AUD/USD ticks to terminal
-- [x] Step 3 — Persist ticks to SQLite
+- [x] Step 3 — Persist ticks to Postgres
 - [x] Step 4 — First heuristic signal
 - [x] Step 5 — Streamlit dashboard
 - [ ] Step 6 — Phone access (LAN / tunnel)

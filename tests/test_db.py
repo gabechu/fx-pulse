@@ -1,28 +1,32 @@
-"""Offline tests for the migration runner — uses tmp_path, no network."""
+"""Tests for the migration runner — runs against a per-test Postgres schema."""
 from __future__ import annotations
 
-import sqlite3
-
+import psycopg
 import pytest
 
 from fx_pulse import db
 from fx_pulse.db import apply_migrations, open_connection
 
 
-def test_apply_migrations_creates_schema_version_table(tmp_path):
-    p = str(tmp_path / "x.db")
-    apply_migrations(p)
-    with sqlite3.connect(p) as conn:
-        tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )}
-    assert "schema_version" in tables
+def _tables(conn: psycopg.Connection) -> set[str]:
+    return {
+        row[0]
+        for row in conn.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = current_schema()"
+        )
+    }
 
 
-def test_apply_migrations_records_each_applied_version(tmp_path):
-    p = str(tmp_path / "x.db")
-    apply_migrations(p)
-    with sqlite3.connect(p) as conn:
+def test_apply_migrations_creates_schema_version_table(pg_dsn):
+    apply_migrations(pg_dsn)
+    with psycopg.connect(pg_dsn) as conn:
+        assert "schema_version" in _tables(conn)
+
+
+def test_apply_migrations_records_each_applied_version(pg_dsn):
+    apply_migrations(pg_dsn)
+    with psycopg.connect(pg_dsn) as conn:
         versions = sorted(
             row[0] for row in conn.execute("SELECT version FROM schema_version")
         )
@@ -30,31 +34,25 @@ def test_apply_migrations_records_each_applied_version(tmp_path):
     assert versions == [1, 2, 3]
 
 
-def test_apply_migrations_is_idempotent(tmp_path):
-    p = str(tmp_path / "x.db")
-    apply_migrations(p)
-    apply_migrations(p)
-    apply_migrations(p)
-    with sqlite3.connect(p) as conn:
+def test_apply_migrations_is_idempotent(pg_dsn):
+    apply_migrations(pg_dsn)
+    apply_migrations(pg_dsn)
+    apply_migrations(pg_dsn)
+    with psycopg.connect(pg_dsn) as conn:
         count = conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
     assert count == 3  # one row per applied version, no duplicates
 
 
-def test_open_connection_enables_wal_and_applies_schema(tmp_path):
-    p = str(tmp_path / "x.db")
-    conn = open_connection(p)
+def test_open_connection_applies_schema(pg_dsn):
+    conn = open_connection(pg_dsn)
     try:
-        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-        tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )}
+        tables = _tables(conn)
     finally:
         conn.close()
-    assert mode.lower() == "wal"
     assert {"ticks", "signals", "schema_version"} <= tables
 
 
-def test_migration_failure_rolls_back(tmp_path, monkeypatch):
+def test_migration_failure_rolls_back(pg_dsn, tmp_path, monkeypatch):
     # Point the runner at a fake migrations dir whose second file is bad SQL.
     # The runner must record version 1, then leave version 2 unrecorded —
     # and the bad file must not have left a half-built table behind.
@@ -66,21 +64,20 @@ def test_migration_failure_rolls_back(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(db, "_MIGRATIONS_DIR", fake_dir)
 
-    p = str(tmp_path / "x.db")
-    with pytest.raises(sqlite3.OperationalError):
-        apply_migrations(p)
+    with pytest.raises(psycopg.Error):
+        apply_migrations(pg_dsn)
 
-    with sqlite3.connect(p) as conn:
+    with psycopg.connect(pg_dsn) as conn:
         versions = {row[0] for row in conn.execute("SELECT version FROM schema_version")}
-        tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )}
+        tables = _tables(conn)
     assert versions == {1}
     assert "good" in tables
     assert "half" not in tables  # rolled back
 
 
-def test_new_migration_files_are_picked_up_without_python_changes(tmp_path, monkeypatch):
+def test_new_migration_files_are_picked_up_without_python_changes(
+    pg_dsn, tmp_path, monkeypatch
+):
     # Proves the "drop a .sql file in" incremental-change story: a brand-new
     # migration file is detected and applied without touching db.py.
     fake_dir = tmp_path / "migs"
@@ -88,15 +85,12 @@ def test_new_migration_files_are_picked_up_without_python_changes(tmp_path, monk
     (fake_dir / "001_a.sql").write_text("CREATE TABLE a (x INTEGER);")
     monkeypatch.setattr(db, "_MIGRATIONS_DIR", fake_dir)
 
-    p = str(tmp_path / "x.db")
-    apply_migrations(p)
+    apply_migrations(pg_dsn)
 
     # Operator drops a new file in later; second run picks it up.
     (fake_dir / "002_b.sql").write_text("CREATE TABLE b (x INTEGER);")
-    apply_migrations(p)
+    apply_migrations(pg_dsn)
 
-    with sqlite3.connect(p) as conn:
-        tables = {row[0] for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )}
+    with psycopg.connect(pg_dsn) as conn:
+        tables = _tables(conn)
     assert {"a", "b"} <= tables
