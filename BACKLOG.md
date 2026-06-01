@@ -11,6 +11,7 @@ Tick off as we go. Ordering inside each section is rough priority.
 - [ ] **SIGTERM handler in `stream.main`.** [stream.py:32](fx_pulse/stream.py#L32) only catches `KeyboardInterrupt`. ECS sends `SIGTERM` then `SIGKILL`. WAL + `synchronous=NORMAL` survives crash, but we lose the clean-shutdown log event and any future in-flight buffering.
 - [ ] **Tighten dedup-key contract.** [storage.py:29](fx_pulse/storage.py#L29) hashes `instrument|time` only. If OANDA ever emits two `PRICE` events at the same microsecond, the second is silently dropped. Document the assumption (vendor timestamps unique per instrument) or extend the key.
 - [ ] **README crash-safety wording.** "Most you'll lose on abrupt shutdown is the in-flight tick" is true for process crash; power loss with `synchronous=NORMAL` can lose the last group of commits since the last WAL checkpoint. Minor.
+- [ ] **Fill tick gaps from local-streamer downtime.** Laptop isn't up 24/7, so `ticks` has windows missing during market hours. Find them with a `LAG(time) OVER (ORDER BY time)` query against `ticks` (excluding the Fri 22:00 → Sun 22:00 UTC weekend close), then re-run [fx_pulse/backfill.py](fx_pulse/backfill.py) for each gap window — `ON CONFLICT (tick_id) DO NOTHING` makes it idempotent. Treat live and candle-filled rows as one pool downstream; the `source` column stays as forensic provenance only, not a logical divide. Worth scripting as a one-shot `python -m fx_pulse.fill_gaps` once the manual flow has been used a couple of times.
 
 ## Observability
 
