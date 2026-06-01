@@ -5,7 +5,7 @@ FROM        ?= 2023-05-30T00:00:00Z
 TO          ?= 2026-05-30T00:00:00Z
 GRANULARITY ?= M1
 
-.PHONY: help stream grafana test backfill build teardown
+.PHONY: help stream grafana test backfill train-model build teardown
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -26,6 +26,10 @@ backfill: ## Backfill historical candles. Override: INSTRUMENT=, FROM=, TO=, GRA
 		--instrument $(INSTRUMENT) \
 		--from $(FROM) --to $(TO) \
 		--granularity $(GRANULARITY)
+
+train-model: ## Train the oversold/overbought classifier on tick data in Postgres
+	docker compose run --rm --build -v $(CURDIR)/data:/app/data app \
+		uv run python -m fx_pulse.ml.train
 
 build: ## Rebuild the app image without running anything
 	docker compose build app
