@@ -47,17 +47,34 @@ class OandaTickStream:
         return cls(token, account_id, os.getenv("OANDA_ENV", "practice"))
 
     def stream(self, instruments: Iterable[str]) -> Iterator[Tick]:
+        # OANDA's pricing stream is a long-lived chunked HTTP response and is
+        # documented as non-permanent — drops are expected. Reconnect forever
+        # with capped exponential backoff; let non-retryable errors propagate.
         params = {"instruments": ",".join(instruments)}
-        request = PricingStream(accountID=self._account_id, params=params)
-        for msg in self._api.request(request):
-            if msg.get("type") != "PRICE":
-                continue
-            yield Tick(
-                instrument=msg["instrument"],
-                time=msg["time"],
-                bid=float(msg["bids"][0]["price"]),
-                ask=float(msg["asks"][0]["price"]),
-            )
+        attempt = 0
+        while True:
+            request = PricingStream(accountID=self._account_id, params=params)
+            try:
+                for msg in self._api.request(request):
+                    attempt = 0
+                    if msg.get("type") != "PRICE":
+                        continue
+                    yield Tick(
+                        instrument=msg["instrument"],
+                        time=msg["time"],
+                        bid=float(msg["bids"][0]["price"]),
+                        ask=float(msg["asks"][0]["price"]),
+                    )
+                log.warning("OANDA stream closed cleanly; reconnecting")
+            except Exception as exc:
+                if not _is_retryable(exc):
+                    raise
+                log.warning(
+                    "OANDA stream dropped; reconnecting",
+                    extra={"error": repr(exc), "attempt": attempt + 1},
+                )
+            time.sleep(_backoff_delay(attempt, _RETRY_BASE_SECONDS, _STREAM_BACKOFF_CAP_SECONDS))
+            attempt += 1
 
 
 class OandaHistory:
@@ -141,7 +158,7 @@ class OandaHistory:
             except Exception as exc:
                 if attempt + 1 == _MAX_RETRIES or not _is_retryable(exc):
                     raise
-                delay = _RETRY_BASE_SECONDS * (2 ** attempt)
+                delay = _backoff_delay(attempt, _RETRY_BASE_SECONDS, _HISTORY_BACKOFF_CAP_SECONDS)
                 log.warning(
                     "OANDA request failed; retrying",
                     extra={"error": repr(exc), "delay_s": round(delay, 1), "attempt": attempt + 1},
@@ -152,10 +169,20 @@ class OandaHistory:
 
 _MAX_RETRIES = 3
 _RETRY_BASE_SECONDS = 1.0
+_HISTORY_BACKOFF_CAP_SECONDS = 30.0
+_STREAM_BACKOFF_CAP_SECONDS = 30.0
+
+
+def _backoff_delay(attempt: int, base: float, cap: float) -> float:
+    return min(base * (2 ** attempt), cap)
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+    if isinstance(exc, (
+        requests.exceptions.ChunkedEncodingError,
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+    )):
         return True
     if isinstance(exc, V20Error):
         try:
