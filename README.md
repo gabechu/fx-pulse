@@ -50,12 +50,14 @@ volume; `docker compose down -v` wipes it.
 ### Dashboard
 
 ```bash
-docker compose up dashboard
+make grafana
 ```
 
-Open <http://localhost:8501>. Shows the latest signal label, recent tick count,
-and a mid-price chart with the short/long MAs overlaid. Auto-refreshes every
-5 seconds.
+Open <http://localhost:3000> (anonymous viewer; `admin` / `admin` to edit).
+Provisioned dashboard `fx-pulse · AUD/USD` shows the latest signal label,
+recent tick count, source breakdown, and a bid/ask price chart.
+Auto-refreshes every 5s; use the time-range picker top-right for
+1h / 6h / 1d / 1w / 30d windows.
 
 ## Observability
 

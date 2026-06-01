@@ -1,0 +1,180 @@
+{
+  "title": "fx-pulse · AUD/USD",
+  "uid": "fx-pulse-aud-usd",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "tags": ["fx-pulse"],
+  "timezone": "",
+  "refresh": "5s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "1h"],
+    "time_options": ["1h", "6h", "1d", "1w", "30d"]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Signal",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT label FROM signals WHERE instrument = 'AUD_USD' ORDER BY time DESC LIMIT 1",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "long":  {"text": "LONG",  "color": "green", "index": 0},
+                "short": {"text": "SHORT", "color": "red",   "index": 1},
+                "flat":  {"text": "FLAT",  "color": "text",  "index": 2}
+              }
+            }
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Rows in window",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT count(*) AS rows FROM ticks WHERE instrument = 'AUD_USD' AND $__timeFilter(time)",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Latest tick",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT max(time) AS latest FROM ticks WHERE instrument = 'AUD_USD' AND $__timeFilter(time)",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "dateTimeAsIso", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 4,
+      "type": "bargauge",
+      "title": "Rows by source",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT source, count(*) AS rows FROM ticks WHERE instrument = 'AUD_USD' AND $__timeFilter(time) GROUP BY source ORDER BY source",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "lcd",
+        "showUnfilled": true,
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "AUD/USD bid / ask",
+      "gridPos": {"x": 0, "y": 4, "w": 24, "h": 16},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT time AS \"time\", bid, ask FROM ticks WHERE instrument = 'AUD_USD' AND $__timeFilter(time) ORDER BY time",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "spanNulls": true,
+            "showPoints": "never",
+            "pointSize": 2,
+            "axisPlacement": "auto"
+          },
+          "color": {"mode": "palette-classic"},
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "bid"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "ask"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"showLegend": true, "displayMode": "list", "placement": "bottom", "calcs": []}
+      }
+    }
+  ]
+}

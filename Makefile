@@ -5,7 +5,7 @@ FROM        ?= 2023-05-30T00:00:00Z
 TO          ?= 2026-05-30T00:00:00Z
 GRANULARITY ?= M1
 
-.PHONY: help stream dashboard test backfill build teardown
+.PHONY: help stream grafana test backfill build teardown
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -14,8 +14,9 @@ help:
 stream: ## Run the live tick streamer (rebuilds image)
 	docker compose up --build app
 
-dashboard: ## Run the Streamlit dashboard
-	docker compose up --build dashboard
+grafana: ## Run Grafana with the provisioned AUD/USD dashboard
+	docker compose up -d grafana
+	@echo "Grafana up at http://localhost:3000  (anonymous viewer; admin/admin to edit)"
 
 test: ## Run the offline test suite
 	docker compose run --rm tests

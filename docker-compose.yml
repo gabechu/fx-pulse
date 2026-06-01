@@ -26,29 +26,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  dashboard:
-    build:
-      context: .
-      target: app
-    environment:
-      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8501:8501"
-    command:
-      - uv
-      - run
-      - streamlit
-      - run
-      - fx_pulse/dashboard.py
-      - --server.address=0.0.0.0
-      - --server.port=8501
-      - --server.headless=true
-      - --browser.gatherUsageStats=false
-    restart: unless-stopped
-
   tests:
     build:
       context: .
@@ -60,5 +37,25 @@ services:
         condition: service_healthy
     profiles: ["test"]
 
+  grafana:
+    image: grafana/grafana-oss:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  grafana-data:

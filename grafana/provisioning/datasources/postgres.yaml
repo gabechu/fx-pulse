@@ -1,0 +1,18 @@
+apiVersion: 1
+
+datasources:
+  - name: fx-pulse-postgres
+    uid: fx-pulse-postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: fx_pulse
+    database: fx_pulse
+    secureJsonData:
+      password: fx_pulse
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    isDefault: true
+    editable: true

@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: fx-pulse
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
