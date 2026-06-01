@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+import threading
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -81,3 +82,59 @@ def test_oanda_stream_propagates_non_retryable_error(monkeypatch):
 
     with pytest.raises(ValueError, match="config bug"):
         next(adapter.stream(["AUD_USD"]))
+
+
+def test_oanda_stream_invokes_on_reconnect_per_drop(monkeypatch):
+    monkeypatch.setattr(oanda_mod.time, "sleep", lambda *_: None)
+
+    def first_response():
+        yield _price_msg("2026-06-01T06:17:23.849503422Z", "0.71851", "0.71859")
+        raise requests.exceptions.ChunkedEncodingError("upstream dropped")
+
+    def second_response():
+        yield _price_msg("2026-06-01T06:17:24.109128845Z", "0.71850", "0.71856")
+        raise requests.exceptions.ConnectionError("dropped again")
+
+    def third_response():
+        yield _price_msg("2026-06-01T06:17:25.000000000Z", "0.71849", "0.71855")
+
+    responses = iter([first_response, second_response, third_response])
+
+    class FakeAPI:
+        def request(self, _req):
+            return next(responses)()
+
+    adapter = OandaTickStream(token="x", account_id="y")
+    adapter._api = FakeAPI()
+
+    reconnects = 0
+
+    def bump():
+        nonlocal reconnects
+        reconnects += 1
+
+    list(itertools.islice(adapter.stream(["AUD_USD"], on_reconnect=bump), 3))
+    assert reconnects == 2  # two drops between three connects
+
+
+def test_oanda_stream_stops_when_event_set_during_backoff(monkeypatch):
+    stop = threading.Event()
+
+    def fake_wait(timeout):
+        stop.set()
+        return True  # mimic Event.wait returning True when set
+
+    monkeypatch.setattr(stop, "wait", fake_wait)
+
+    class FakeAPI:
+        def request(self, _req):
+            raise requests.exceptions.ConnectionError("flaky")
+
+    adapter = OandaTickStream(token="x", account_id="y")
+    adapter._api = FakeAPI()
+
+    # Without the stop hook this would reconnect forever; with it we expect
+    # the generator to exhaust after the first backoff.
+    ticks = list(adapter.stream(["AUD_USD"], stop=stop))
+    assert ticks == []
+    assert stop.is_set()

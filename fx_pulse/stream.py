@@ -8,7 +8,9 @@ DB target is via `DATABASE_URL` (libpq URI).
 from __future__ import annotations
 
 import os
+import signal as signalmod
 import sys
+import threading
 
 from fx_pulse.obs import Metrics, get_logger, touch_liveness
 from fx_pulse.providers import get_provider
@@ -32,9 +34,19 @@ def main() -> None:
     log.info("streaming starting", extra={"instrument": "AUD_USD"})
     metrics = Metrics(logger=log)
     crossover = MACrossover()
+    # SIGTERM-driven graceful shutdown: ECS sends SIGTERM on stop, and
+    # Python does not translate it to KeyboardInterrupt. The handler sets
+    # the event; the provider checks it at loop top and uses it as an
+    # interruptible sleep so we don't sit out a 30s backoff before exiting.
+    stop = threading.Event()
+    signalmod.signal(signalmod.SIGTERM, lambda _signum, _frame: stop.set())
     try:
         with TickStore.open(dsn) as ticks, SignalStore.open(dsn) as signals:
-            for tick in provider.stream(["AUD_USD"]):
+            for tick in provider.stream(
+                ["AUD_USD"],
+                on_reconnect=metrics.record_reconnect,
+                stop=stop,
+            ):
                 tid = tick_id_for(tick)
                 ticks.write(tick, tid, source="live")
                 touch_liveness()
@@ -67,6 +79,8 @@ def main() -> None:
                     )
                 metrics.maybe_flush()
     except KeyboardInterrupt:
+        pass
+    finally:
         metrics.flush()
         log.info("stopped")
 

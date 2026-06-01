@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import os
+import random
+import threading
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, Optional
 
 import requests.exceptions
 from oandapyV20 import API
@@ -46,13 +48,24 @@ class OandaTickStream:
             )
         return cls(token, account_id, os.getenv("OANDA_ENV", "practice"))
 
-    def stream(self, instruments: Iterable[str]) -> Iterator[Tick]:
+    def stream(
+        self,
+        instruments: Iterable[str],
+        *,
+        on_reconnect: Optional[Callable[[], None]] = None,
+        stop: Optional[threading.Event] = None,
+    ) -> Iterator[Tick]:
         # OANDA's pricing stream is a long-lived chunked HTTP response and is
         # documented as non-permanent — drops are expected. Reconnect forever
         # with capped exponential backoff; let non-retryable errors propagate.
+        # `on_reconnect` fires once per drop (counter hook). `stop` is checked
+        # at the top of each loop and used as an interruptible sleep so
+        # SIGTERM doesn't wait out the backoff cap.
         params = {"instruments": ",".join(instruments)}
         attempt = 0
         while True:
+            if stop is not None and stop.is_set():
+                return
             request = PricingStream(accountID=self._account_id, params=params)
             try:
                 for msg in self._api.request(request):
@@ -73,7 +86,14 @@ class OandaTickStream:
                     "OANDA stream dropped; reconnecting",
                     extra={"error": repr(exc), "attempt": attempt + 1},
                 )
-            time.sleep(_backoff_delay(attempt, _RETRY_BASE_SECONDS, _STREAM_BACKOFF_CAP_SECONDS))
+            if on_reconnect is not None:
+                on_reconnect()
+            delay = _backoff_delay(attempt, _RETRY_BASE_SECONDS, _STREAM_BACKOFF_CAP_SECONDS)
+            if stop is not None:
+                if stop.wait(delay):
+                    return
+            else:
+                time.sleep(delay)
             attempt += 1
 
 
@@ -174,7 +194,11 @@ _STREAM_BACKOFF_CAP_SECONDS = 30.0
 
 
 def _backoff_delay(attempt: int, base: float, cap: float) -> float:
-    return min(base * (2 ** attempt), cap)
+    # Equal jitter: half deterministic backoff, half random. Prevents
+    # synchronized reconnect storms without ever dropping to ~0s (which
+    # full jitter would do on the first retry).
+    target = min(base * (2 ** attempt), cap)
+    return target / 2 + random.uniform(0, target / 2)
 
 
 def _is_retryable(exc: BaseException) -> bool:
