@@ -21,6 +21,9 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
+      FX_PULSE_MODEL_DIR: /app/data/models
+    volumes:
+      - ./data:/app/data:ro
     depends_on:
       postgres:
         condition: service_healthy

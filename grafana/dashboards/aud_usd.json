@@ -2,7 +2,7 @@
   "title": "fx-pulse · AUD/USD",
   "uid": "fx-pulse-aud-usd",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "editable": true,
   "tags": ["fx-pulse"],
   "timezone": "",
@@ -174,6 +174,252 @@
       "options": {
         "tooltip": {"mode": "multi", "sort": "none"},
         "legend": {"showLegend": true, "displayMode": "list", "placement": "bottom", "calcs": []}
+      }
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Daily row count — gap detector",
+      "description": "Daily tick rows split by source. Weekday bars should be roughly the same height — a short weekday bar means investigate that day. Weekend bars near zero is the FX market being closed, not a gap. Panel time range is fixed at 30 days regardless of the dashboard range.",
+      "gridPos": {"x": 0, "y": 20, "w": 24, "h": 8},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "timeFrom": "30d",
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', time) AS time, count(*) FILTER (WHERE source = 'live') AS live, count(*) FILTER (WHERE source = 'candle') AS candle FROM ticks WHERE instrument = 'AUD_USD' AND $__timeFilter(time) GROUP BY 1 ORDER BY 1",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {"mode": "palette-classic"},
+          "custom": {
+            "axisPlacement": "auto",
+            "lineWidth": 1,
+            "fillOpacity": 80
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "live"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "candle"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "stacking": "normal",
+        "groupWidth": 0.7,
+        "barWidth": 0.97,
+        "legend": {"showLegend": true, "displayMode": "list", "placement": "bottom", "calcs": []},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Latest model decision",
+      "gridPos": {"x": 0, "y": 28, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT decision FROM predictions WHERE instrument = 'AUD_USD' ORDER BY predicted_at DESC LIMIT 1",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "BUY":         {"text": "BUY",         "color": "green",  "index": 0},
+                "NO_DECISION": {"text": "NO DECISION", "color": "text",   "index": 1}
+              }
+            }
+          ],
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "BUY signals (last 24h)",
+      "gridPos": {"x": 6, "y": 28, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT count(*) AS buys FROM predictions WHERE instrument = 'AUD_USD' AND decision = 'BUY' AND predicted_at > now() - interval '24 hours'",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}, {"color": "green", "value": 1}]}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Last BUY signal",
+      "gridPos": {"x": 12, "y": 28, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT max(predicted_at) AS last_buy FROM predictions WHERE instrument = 'AUD_USD' AND decision = 'BUY'",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "dateTimeAsIso", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}, "noValue": "never"},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Model version",
+      "gridPos": {"x": 18, "y": 28, "w": 6, "h": 4},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT model_version FROM predictions WHERE instrument = 'AUD_USD' ORDER BY predicted_at DESC LIMIT 1",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "BUY probability — model output over time",
+      "description": "Calibrated probability the model assigns to BUY at each 1-min boundary. Decision = BUY when buy_proba >= threshold (chosen at training time to hit the precision target). Spikes near the threshold mean the model is on the edge of firing.",
+      "gridPos": {"x": 0, "y": 32, "w": 24, "h": 12},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT predicted_at AS \"time\", buy_proba FROM predictions WHERE instrument = 'AUD_USD' AND $__timeFilter(predicted_at) ORDER BY predicted_at",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "showPoints": "auto",
+            "pointSize": 4,
+            "axisPlacement": "auto"
+          },
+          "color": {"mode": "fixed", "fixedColor": "green"},
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"showLegend": true, "displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull", "max"]}
+      }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Recent BUY signals",
+      "description": "All BUY decisions in the dashboard time range, newest first. Click a row to copy its feature_at — use that to inspect features_used in psql.",
+      "gridPos": {"x": 0, "y": 44, "w": 24, "h": 10},
+      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT predicted_at, feature_at, buy_proba, model_version FROM predictions WHERE instrument = 'AUD_USD' AND decision = 'BUY' AND $__timeFilter(predicted_at) ORDER BY predicted_at DESC",
+          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "auto"},
+          "color": {"mode": "thresholds"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "buy_proba"},
+            "properties": [
+              {"id": "unit", "value": "percentunit"},
+              {"id": "decimals", "value": 3}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "predicted_at"},
+            "properties": [{"id": "unit", "value": "dateTimeAsIso"}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "feature_at"},
+            "properties": [{"id": "unit", "value": "dateTimeAsIso"}]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {"show": false}
       }
     }
   ]

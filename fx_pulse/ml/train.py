@@ -1,19 +1,17 @@
 """Train two binary classifiers (buy / sell), pick precision-targeted thresholds.
 
-End-to-end pipeline:
-
-1. Pull 1-min mid prices from Postgres.
-2. Compute features and forward labels.
-3. Chronological 70/15/15 split with a HORIZON_BARS gap between splits to
+Pipeline:
+1. Build a grid of timestamps to evaluate (every TRAIN_STRIDE_MIN minutes
+   over the price-data span).
+2. Call `features.assemble(timestamps)` once → wide feature matrix.
+3. Call `features.compute_labels(timestamps)` → forward 30-day-return labels.
+4. Chronological 70/15/15 split with a HORIZON_BARS gap between splits to
    prevent label-leakage across the boundary.
-4. Train HistGradientBoostingClassifier per direction. Wrap in
-   CalibratedClassifierCV (isotonic, prefit) on the validation slice so the
-   probabilities we threshold are well-calibrated.
-5. Pick the smallest probability threshold on validation that achieves the
-   target precision; report precision/recall + signal frequency on test.
-6. Persist artifacts to MODEL_DIR.
+5. Per-direction HistGradientBoostingClassifier → isotonic calibration on
+   the val slice → smallest val threshold meeting target precision.
+6. Persist {model.joblib, model_meta.json} so `infer.Predictor` can load.
 
-Run with `make train-model` (calls `python -m fx_pulse.ml.train`).
+Train and inference both call the same `assemble()`. Parity by reuse.
 """
 from __future__ import annotations
 
@@ -21,26 +19,27 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import joblib
 import numpy as np
 import pandas as pd
+import psycopg
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.frozen import FrozenEstimator
 from sklearn.metrics import precision_score, recall_score
 
-from fx_pulse.ml.dataset import load_mid_prices
-from fx_pulse.ml.features import compute_features, feature_columns
-from fx_pulse.ml.labels import HORIZON_BARS, compute_labels
+from fx_pulse.features import FEATURES
+from fx_pulse.features.assemble import assemble
+from fx_pulse.ml.label import HORIZON_BARS, compute_labels
 from fx_pulse.obs import get_logger
 
 log = get_logger(__name__)
 
 DEFAULT_TARGET_PRECISION = 0.90
-DEFAULT_TRAIN_STRIDE = 15  # use every Nth bar for training to reduce label correlation
+DEFAULT_TRAIN_STRIDE_MIN = 15  # evaluate one row every 15 min over history
 DEFAULT_MODEL_DIR = Path(os.environ.get("FX_PULSE_MODEL_DIR", "data/models"))
+MODEL_VERSION = "v2"
 
 
 @dataclass
@@ -54,28 +53,32 @@ class DirectionResult:
     test_recall: float
     test_signal_rate: float
     base_rate: float
-    n_train_pos: int
-    n_train: int
+    n_pos: int
+    n_total: int
 
 
 def main(
     target_precision: float = DEFAULT_TARGET_PRECISION,
-    train_stride: int = DEFAULT_TRAIN_STRIDE,
+    train_stride_min: int = DEFAULT_TRAIN_STRIDE_MIN,
     model_dir: Path = DEFAULT_MODEL_DIR,
 ) -> None:
-    log.info("loading mid prices from postgres")
-    df = load_mid_prices()
+    timestamps = _build_grid(train_stride_min)
     log.info(
-        "loaded mid prices",
-        extra={"rows": len(df), "first": str(df.index[0]), "last": str(df.index[-1])},
+        "built timestamp grid",
+        extra={
+            "rows": len(timestamps),
+            "first": str(timestamps[0]),
+            "last": str(timestamps[-1]),
+            "stride_min": train_stride_min,
+        },
     )
 
-    log.info("computing features")
-    features = compute_features(df["mid"])
-    log.info("computed features", extra={"rows": len(features)})
+    log.info("assembling features")
+    features = assemble(timestamps).dropna(how="all")
+    log.info("assembled features", extra={"rows": len(features), "cols": features.shape[1]})
 
     log.info("computing labels")
-    labels = compute_labels(df["mid"])
+    labels = compute_labels(timestamps)
     log.info(
         "computed labels",
         extra={
@@ -85,36 +88,29 @@ def main(
         },
     )
 
-    joined = features.join(labels, how="inner")
+    joined = features.join(labels, how="inner").dropna(subset=["buy", "sell"])
     log.info("joined feature+label rows", extra={"rows": len(joined)})
 
-    train, val, test = _time_split(joined, gap_bars=HORIZON_BARS)
+    bars_per_stride = train_stride_min  # 1 row per `stride` minutes
+    gap_rows = HORIZON_BARS // bars_per_stride
+    train, val, test = _time_split(joined, gap_rows=gap_rows)
     log.info(
         "split sizes",
         extra={"train": len(train), "val": len(val), "test": len(test)},
     )
 
-    # Downsample training rows: adjacent minute bars share most of their
-    # forward label, so taking every Nth row removes redundancy without
-    # discarding information.
-    train_ds = train.iloc[::train_stride]
-    log.info(
-        "downsampled training set",
-        extra={"stride": train_stride, "rows": len(train_ds)},
-    )
-
-    feat_cols = feature_columns()
+    feat_cols = list(FEATURES.keys())
     results: dict[str, DirectionResult] = {}
     models: dict[str, CalibratedClassifierCV] = {}
 
     for direction in ("buy", "sell"):
         log.info("training direction", extra={"direction": direction})
-        x_train = train_ds[feat_cols].to_numpy()
-        y_train = train_ds[direction].to_numpy()
+        x_train = train[feat_cols].to_numpy()
+        y_train = train[direction].to_numpy().astype(int)
         x_val = val[feat_cols].to_numpy()
-        y_val = val[direction].to_numpy()
+        y_val = val[direction].to_numpy().astype(int)
         x_test = test[feat_cols].to_numpy()
-        y_test = test[direction].to_numpy()
+        y_test = test[direction].to_numpy().astype(int)
 
         base = HistGradientBoostingClassifier(
             max_iter=400,
@@ -126,9 +122,6 @@ def main(
         )
         base.fit(x_train, y_train)
 
-        # Calibrate on the validation slice so threshold selection (also on
-        # val) operates on well-calibrated probabilities. FrozenEstimator
-        # tells CalibratedClassifierCV not to refit the base learner.
         calibrated = CalibratedClassifierCV(FrozenEstimator(base), method="isotonic")
         calibrated.fit(x_val, y_val)
 
@@ -149,29 +142,23 @@ def main(
             test_recall=_safe_recall(y_test, test_pred),
             test_signal_rate=float(test_pred.mean()),
             base_rate=float(y_train.mean()),
-            n_train_pos=int(y_train.sum()),
-            n_train=int(len(y_train)),
+            n_pos=int(y_train.sum()),
+            n_total=int(len(y_train)),
         )
         models[direction] = calibrated
-        log.info(
-            "direction trained",
-            extra={"direction": direction, **vars(results[direction])},
-        )
+        log.info("direction trained", extra={"direction": direction, **vars(results[direction])})
 
     model_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = model_dir / "model.joblib"
     meta_path = model_dir / "model_meta.json"
     joblib.dump(
-        {
-            "buy": models["buy"],
-            "sell": models["sell"],
-            "feature_columns": feat_cols,
-        },
+        {"buy": models["buy"], "sell": models["sell"], "feature_columns": feat_cols},
         artifact_path,
     )
     meta = {
+        "model_version": MODEL_VERSION,
         "target_precision": target_precision,
-        "train_stride": train_stride,
+        "train_stride_min": train_stride_min,
         "horizon_bars": HORIZON_BARS,
         "results": {d: vars(r) for d, r in results.items()},
         "train_start": str(train.index[0]),
@@ -187,34 +174,37 @@ def main(
     _print_report(results, target_precision)
 
 
-def _time_split(
-    df: pd.DataFrame, gap_bars: int
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Chronological 70/15/15 with a `gap_bars` buffer between splits.
+def _build_grid(stride_min: int) -> pd.DatetimeIndex:
+    """Sample one timestamp every `stride_min` minutes over the AUD/USD span in `ticks`."""
+    dsn = os.environ["DATABASE_URL"]
+    with psycopg.connect(dsn) as conn:
+        row = conn.execute(
+            "SELECT MIN(time), MAX(time) FROM ticks WHERE instrument = 'AUD_USD'"
+        ).fetchone()
+    first, last = row
+    grid = pd.date_range(
+        start=pd.Timestamp(first).ceil(f"{stride_min}min"),
+        end=pd.Timestamp(last).floor(f"{stride_min}min"),
+        freq=f"{stride_min}min",
+        tz="UTC",
+    )
+    return grid
 
-    The buffer is essential: a row in train carries a label that peeks
-    HORIZON_BARS forward; without a gap, the last rows of train would have
-    labels overlapping the first rows of val.
-    """
+
+def _time_split(
+    df: pd.DataFrame, gap_rows: int
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     n = len(df)
     train_end = int(n * 0.70)
     val_end = int(n * 0.85)
-    train = df.iloc[: max(0, train_end - gap_bars)]
-    val = df.iloc[train_end : max(train_end, val_end - gap_bars)]
+    train = df.iloc[: max(0, train_end - gap_rows)]
+    val = df.iloc[train_end : max(train_end, val_end - gap_rows)]
     test = df.iloc[val_end:]
     return train, val, test
 
 
-def _pick_threshold(
-    y: np.ndarray, proba: np.ndarray, target_precision: float
-) -> float:
-    """Smallest threshold in [0,1] whose precision on (y, proba) >= target.
-
-    Returns 1.01 (i.e. never fires) if no threshold reaches the target.
-    """
-    # Sort candidate thresholds descending; walk down, track positive count
-    # and TP count, stop when precision first dips below target after having
-    # been above it.
+def _pick_threshold(y: np.ndarray, proba: np.ndarray, target_precision: float) -> float:
+    """Smallest threshold whose precision on (y, proba) >= target. 1.01 if unreachable."""
     order = np.argsort(proba)[::-1]
     sorted_y = y[order]
     sorted_p = proba[order]
@@ -227,8 +217,6 @@ def _pick_threshold(
             tp += 1
         else:
             fp += 1
-        # Only consider committing to a threshold at the end of a run of
-        # ties — otherwise we'd be claiming precision over a partial group.
         if i + 1 < n and sorted_p[i + 1] == sorted_p[i]:
             continue
         precision = tp / (tp + fp)
@@ -250,26 +238,20 @@ def _safe_recall(y: np.ndarray, pred: np.ndarray) -> float:
 
 
 def _print_report(results: dict[str, DirectionResult], target_precision: float) -> None:
-    lines = [
-        "",
-        f"=== Training report (target precision {target_precision:.0%}) ===",
-    ]
+    lines = ["", f"=== Training report (target precision {target_precision:.0%}) ==="]
     for direction, r in results.items():
         lines.append(f"\n[{direction.upper()}]")
         lines.append(
-            f"  base rate (train): {r.base_rate:.1%}  "
-            f"({r.n_train_pos:,}/{r.n_train:,} positive)"
+            f"  base rate (train): {r.base_rate:.1%}  ({r.n_pos:,}/{r.n_total:,} positive)"
         )
         lines.append(f"  threshold (chosen on val): {r.threshold:.4f}")
         lines.append(
             f"  VAL  precision={r.val_precision:.3f}  "
-            f"recall={r.val_recall:.3f}  "
-            f"signal_rate={r.val_signal_rate:.4%}"
+            f"recall={r.val_recall:.3f}  signal_rate={r.val_signal_rate:.4%}"
         )
         lines.append(
             f"  TEST precision={r.test_precision:.3f}  "
-            f"recall={r.test_recall:.3f}  "
-            f"signal_rate={r.test_signal_rate:.4%}"
+            f"recall={r.test_recall:.3f}  signal_rate={r.test_signal_rate:.4%}"
         )
     print("\n".join(lines))
 
