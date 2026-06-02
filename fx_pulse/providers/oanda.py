@@ -54,23 +54,12 @@ class OandaTickStream:
         # `on_reconnect` fires once per drop (counter hook). `stop` is checked
         # at the top of each loop and used as an interruptible sleep so
         # SIGTERM doesn't wait out the backoff cap.
-        params = {"instruments": ",".join(instruments)}
         attempt = 0
-        while True:
-            if stop is not None and stop.is_set():
-                return
-            request = PricingStream(accountID=self._account_id, params=params)
+        while not _stopped(stop):
             try:
-                for msg in self._api.request(request):
-                    attempt = 0
-                    if msg.get("type") != "PRICE":
-                        continue
-                    yield Tick(
-                        instrument=msg["instrument"],
-                        time=msg["time"],
-                        bid=float(msg["bids"][0]["price"]),
-                        ask=float(msg["asks"][0]["price"]),
-                    )
+                for tick in self._open_once(instruments):
+                    attempt = 0  # any yielded tick proves the connection is alive
+                    yield tick
                 log.warning("OANDA stream closed cleanly; reconnecting")
             except Exception as exc:
                 if not _is_retryable(exc):
@@ -82,12 +71,22 @@ class OandaTickStream:
             if on_reconnect is not None:
                 on_reconnect()
             delay = _backoff_delay(attempt, _RETRY_BASE_SECONDS, _STREAM_BACKOFF_CAP_SECONDS)
-            if stop is not None:
-                if stop.wait(delay):
-                    return
-            else:
-                time.sleep(delay)
+            if _sleep_or_stop(stop, delay):
+                return
             attempt += 1
+
+    def _open_once(self, instruments: Iterable[str]) -> Iterator[Tick]:
+        params = {"instruments": ",".join(instruments)}
+        request = PricingStream(accountID=self._account_id, params=params)
+        for msg in self._api.request(request):
+            if msg.get("type") != "PRICE":
+                continue
+            yield Tick(
+                instrument=msg["instrument"],
+                time=msg["time"],
+                bid=float(msg["bids"][0]["price"]),
+                ask=float(msg["asks"][0]["price"]),
+            )
 
 
 class OandaHistory:
@@ -178,6 +177,18 @@ _MAX_RETRIES = 3
 _RETRY_BASE_SECONDS = 1.0
 _HISTORY_BACKOFF_CAP_SECONDS = 30.0
 _STREAM_BACKOFF_CAP_SECONDS = 30.0
+
+
+def _stopped(stop: Optional[threading.Event]) -> bool:
+    return stop is not None and stop.is_set()
+
+
+def _sleep_or_stop(stop: Optional[threading.Event], delay: float) -> bool:
+    """Sleep `delay` seconds; return True if `stop` was set during the wait."""
+    if stop is None:
+        time.sleep(delay)
+        return False
+    return stop.wait(delay)
 
 
 def _backoff_delay(attempt: int, base: float, cap: float) -> float:
