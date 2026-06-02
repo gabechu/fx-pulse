@@ -6,10 +6,7 @@ in-process and emitted as a periodic INFO summary line — no Prometheus or
 StatsD dependency until volume justifies one.
 
 Env vars:
-    LOG_LEVEL      stdlib level name; default INFO
-    LIVENESS_FILE  path to touch after each successful write; opt-in (an
-                   unset value disables the healthcheck side-effect entirely
-                   so local dev does not litter /tmp)
+    LOG_LEVEL  stdlib level name; default INFO
 """
 from __future__ import annotations
 
@@ -19,7 +16,6 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from fx_pulse import config
@@ -141,13 +137,3 @@ class Metrics:
         self._window_start = now
 
 
-def touch_liveness(path: Optional[Path] = None) -> None:
-    """Touch the liveness sentinel file. ECS healthcheck = mtime within N seconds.
-
-    No-op unless LIVENESS_FILE is set (or `path` is passed explicitly).
-    """
-    if path is None:
-        path = config.liveness_file()
-        if path is None:
-            return
-    path.touch()

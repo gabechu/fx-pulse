@@ -16,7 +16,7 @@ import sys
 import threading
 
 from fx_pulse import config
-from fx_pulse.obs import Metrics, get_logger, touch_liveness
+from fx_pulse.obs import Metrics, get_logger
 from fx_pulse.providers import get_provider
 from fx_pulse.storage import TickStore, tick_id_for
 
@@ -50,7 +50,6 @@ def main() -> None:
             ):
                 tid = tick_id_for(tick)
                 ticks.write(tick, tid, source="live")
-                touch_liveness()
                 metrics.record_tick(tick.time)
                 log.info(
                     "tick",

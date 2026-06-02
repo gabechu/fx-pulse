@@ -17,7 +17,6 @@ Tick off as we go. Ordering inside each section is rough priority.
 
 - [x] **Replace `print()` with structured logging.** JSON-to-stdout in [fx_pulse/obs.py](fx_pulse/obs.py); used by `stream`, `backfill`, and the OANDA provider.
 - [x] **Periodic metrics summary.** `Metrics` in [obs.py](fx_pulse/obs.py) accumulates ticks / reconnects / write errors / lag (avg+max ms) and flushes an INFO line every 60s. The `record_reconnect()` hook is wired ahead of the reconnect/backoff work.
-- [x] **Liveness signal for ECS.** `touch_liveness()` in [obs.py](fx_pulse/obs.py); opt-in via `LIVENESS_FILE` env var, called after each successful tick write in [stream.py](fx_pulse/stream.py).
 
 ## Scalability
 

@@ -3,8 +3,7 @@
 Real-time AUD/USD signal + dashboard, backed by OANDA.
 
 Stream AUD/USD → store ticks in Postgres → compute a heuristic signal → show
-it on a dashboard. The data layer is vendor-agnostic — see [Swapping data
-providers](#swapping-data-providers).
+it on a dashboard.
 
 ## Prerequisites
 
@@ -65,9 +64,6 @@ JSON logs to stdout. The streamer emits a `metrics summary` line every 60s
 (ticks, reconnects, write errors, lag avg/max ms).
 
 - `LOG_LEVEL` — stdlib level name; default `INFO`.
-- `LIVENESS_FILE` — opt-in path the streamer touches after each successful
-  write. For an ECS healthcheck, point at e.g. `/tmp/fx_pulse_alive` and
-  check the mtime is recent.
 
 ## How to test
 
@@ -76,15 +72,6 @@ docker compose run --rm tests
 ```
 
 Offline suite — no network, no vendor calls.
-
-## Swapping data providers
-
-Downstream code only sees normalized `Tick` events from the `TickStream`
-Protocol — never vendor payloads. To add a provider (IBKR, Polygon, Databento…):
-
-1. Create `fx_pulse/providers/<name>.py` exposing `stream(instruments) -> Iterator[Tick]`.
-2. Add a branch to `get_provider()` in [providers/__init__.py](fx_pulse/providers/__init__.py).
-3. Select at runtime: `FX_PULSE_PROVIDER=<name>`.
 
 ## Roadmap (one step per commit)
 

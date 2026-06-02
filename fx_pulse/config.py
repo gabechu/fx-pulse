@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 # The only instrument we predict on. See project memory: oil and other
 # series are *inputs* (features), AUD/USD is the prediction target.
@@ -38,11 +37,6 @@ def provider_name() -> str:
 
 def log_level() -> str:
     return os.environ.get("LOG_LEVEL", "INFO").upper()
-
-
-def liveness_file() -> Optional[Path]:
-    val = os.environ.get("LIVENESS_FILE")
-    return Path(val) if val else None
 
 
 def oanda_env() -> str:
