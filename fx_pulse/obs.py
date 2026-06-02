@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from fx_pulse import config
 
 # Stdlib LogRecord has a fixed set of attributes; anything else on the record
 # was added by the caller via `extra=` and should be promoted into the JSON
@@ -59,7 +60,7 @@ def get_logger(name: str) -> logging.Logger:
         handler.setFormatter(_JsonFormatter())
         root.handlers.clear()
         root.addHandler(handler)
-        root.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+        root.setLevel(config.log_level())
         _configured = True
     return logging.getLogger(name)
 
@@ -146,8 +147,7 @@ def touch_liveness(path: Optional[Path] = None) -> None:
     No-op unless LIVENESS_FILE is set (or `path` is passed explicitly).
     """
     if path is None:
-        env = os.environ.get("LIVENESS_FILE")
-        if not env:
+        path = config.liveness_file()
+        if path is None:
             return
-        path = Path(env)
     path.touch()

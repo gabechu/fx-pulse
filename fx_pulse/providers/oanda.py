@@ -1,7 +1,6 @@
 """OANDA v20 streaming + historical adapters."""
 from __future__ import annotations
 
-import os
 import random
 import threading
 import time
@@ -14,6 +13,7 @@ from oandapyV20.endpoints.instruments import InstrumentsCandles
 from oandapyV20.endpoints.pricing import PricingStream
 from oandapyV20.exceptions import V20Error
 
+from fx_pulse import config
 from fx_pulse.obs import get_logger
 from fx_pulse.providers.base import Tick
 
@@ -39,14 +39,7 @@ class OandaTickStream:
 
     @classmethod
     def from_env(cls) -> "OandaTickStream":
-        token = os.environ.get("OANDA_API_TOKEN")
-        account_id = os.environ.get("OANDA_ACCOUNT_ID")
-        if not token or not account_id:
-            raise RuntimeError(
-                "set OANDA_API_TOKEN and OANDA_ACCOUNT_ID "
-                "(e.g. in a .env file, then run with `uv run --env-file .env ...`)"
-            )
-        return cls(token, account_id, os.getenv("OANDA_ENV", "practice"))
+        return cls(config.oanda_token(), config.oanda_account_id(), config.oanda_env())
 
     def stream(
         self,
@@ -103,13 +96,7 @@ class OandaHistory:
 
     @classmethod
     def from_env(cls) -> "OandaHistory":
-        token = os.environ.get("OANDA_API_TOKEN")
-        if not token:
-            raise RuntimeError(
-                "set OANDA_API_TOKEN "
-                "(e.g. in a .env file, then run with `uv run --env-file .env ...`)"
-            )
-        return cls(token, os.getenv("OANDA_ENV", "practice"))
+        return cls(config.oanda_token(), config.oanda_env())
 
     def fetch(
         self, instrument: str, start: str, end: str, granularity: str

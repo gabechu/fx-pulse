@@ -30,8 +30,10 @@ def test_apply_migrations_records_each_applied_version(pg_dsn):
         versions = sorted(
             row[0] for row in conn.execute("SELECT version FROM schema_version")
         )
-    # 001_ticks.sql + 002_signals.sql + 003_tick_source.sql; new files extend this.
-    assert versions == [1, 2, 3]
+    # The version set is derived from `migrations/NNN_*.sql`; this test just
+    # checks every file got recorded, without hard-coding the file list.
+    expected = sorted(int(p.stem.split("_", 1)[0]) for p in db._MIGRATIONS_DIR.glob("*.sql"))
+    assert versions == expected
 
 
 def test_apply_migrations_is_idempotent(pg_dsn):
@@ -40,7 +42,8 @@ def test_apply_migrations_is_idempotent(pg_dsn):
     apply_migrations(pg_dsn)
     with psycopg.connect(pg_dsn) as conn:
         count = conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
-    assert count == 3  # one row per applied version, no duplicates
+    expected = sum(1 for _ in db._MIGRATIONS_DIR.glob("*.sql"))
+    assert count == expected  # one row per applied version, no duplicates
 
 
 def test_open_connection_applies_schema(pg_dsn):

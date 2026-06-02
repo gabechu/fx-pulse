@@ -9,15 +9,14 @@ Adding a new vendor:
 """
 from __future__ import annotations
 
-import os
-
+from fx_pulse import config
 from fx_pulse.providers.base import HistoricalSource, Tick, TickStream
 
 __all__ = ["TickStream", "HistoricalSource", "Tick", "get_provider", "get_historical"]
 
 
 def get_provider() -> TickStream:
-    name = os.getenv("FX_PULSE_PROVIDER", "oanda").lower()
+    name = config.provider_name()
     if name == "oanda":
         from fx_pulse.providers.oanda import OandaTickStream
         return OandaTickStream.from_env()
@@ -25,7 +24,7 @@ def get_provider() -> TickStream:
 
 
 def get_historical() -> HistoricalSource:
-    name = os.getenv("FX_PULSE_PROVIDER", "oanda").lower()
+    name = config.provider_name()
     if name == "oanda":
         from fx_pulse.providers.oanda import OandaHistory
         return OandaHistory.from_env()

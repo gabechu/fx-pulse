@@ -15,9 +15,9 @@ via `DATABASE_URL` (libpq URI, e.g. postgresql://user:pass@host:5432/db).
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
+from fx_pulse import config
 from fx_pulse.obs import get_logger
 from fx_pulse.providers import get_historical
 from fx_pulse.storage import TickStore, tick_id_for
@@ -33,13 +33,9 @@ def main() -> None:
     args = _parse_args()
     try:
         source = get_historical()
+        dsn = config.database_url()
     except (RuntimeError, ValueError) as e:
-        log.error("provider init failed", extra={"error": str(e)})
-        sys.exit(1)
-
-    dsn = os.environ.get("DATABASE_URL")
-    if not dsn:
-        log.error("DATABASE_URL is not set")
+        log.error("startup failed", extra={"error": str(e)})
         sys.exit(1)
     log.info(
         "backfill starting",
@@ -82,7 +78,7 @@ def main() -> None:
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Backfill historical candles as ticks.")
-    p.add_argument("--instrument", default="AUD_USD")
+    p.add_argument("--instrument", default=config.INSTRUMENT)
     p.add_argument("--from", dest="start", required=True, help="RFC3339, e.g. 2026-04-30T00:00:00Z")
     p.add_argument("--to", dest="end", required=True, help="RFC3339, e.g. 2026-05-30T00:00:00Z")
     p.add_argument("--granularity", default="M1", help="OANDA granularity (M1, M5, H1, D, ...)")

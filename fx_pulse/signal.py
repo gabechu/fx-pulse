@@ -4,10 +4,8 @@ First-cut signal for Step 4. Time-based windows (not count-based) so the
 semantics stay honest when tick rate varies between busy sessions and the
 overnight AU lull.
 
-Emits {long, flat, short} once both windows are warm:
-- short MA > long MA → "long"
-- short MA < long MA → "short"
-- equal              → "flat"
+Emits one of LABEL_LONG / LABEL_FLAT / LABEL_SHORT once both windows are
+warm. Callers seeing `None` (during warmup) should log as LABEL_WARMUP.
 """
 from __future__ import annotations
 
@@ -22,6 +20,11 @@ from fx_pulse.providers import Tick
 SHORT_WINDOW_SECONDS = 60
 LONG_WINDOW_SECONDS = 300
 
+LABEL_LONG = "long"
+LABEL_SHORT = "short"
+LABEL_FLAT = "flat"
+LABEL_WARMUP = "warmup"  # exposed for log consumers; never set on a Signal
+
 
 @dataclass(frozen=True)
 class Signal:
@@ -29,7 +32,7 @@ class Signal:
     time: str
     short_ma: float
     long_ma: float
-    label: str  # "long" | "flat" | "short"
+    label: str  # one of LABEL_LONG / LABEL_FLAT / LABEL_SHORT
 
 
 def _to_epoch_seconds(iso_time: str) -> float:
@@ -76,11 +79,11 @@ class MACrossover:
         short_ma = sum(p for _, p in self._short) / len(self._short)
         long_ma = sum(p for _, p in self._long) / len(self._long)
         if short_ma > long_ma:
-            label = "long"
+            label = LABEL_LONG
         elif short_ma < long_ma:
-            label = "short"
+            label = LABEL_SHORT
         else:
-            label = "flat"
+            label = LABEL_FLAT
         return Signal(
             instrument=tick.instrument,
             time=tick.time,
