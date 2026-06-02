@@ -1,4 +1,4 @@
-"""Postgres persistence for ticks and signals.
+"""Postgres persistence for ticks.
 
 Schema (tables, indexes, future column changes) lives in `fx_pulse/migrations/`
 and is applied by `fx_pulse.db.open_connection`. Stores here are thin DAOs:
@@ -18,7 +18,6 @@ import psycopg
 
 from fx_pulse.db import open_connection
 from fx_pulse.providers import Tick
-from fx_pulse.signal import Signal
 
 
 def tick_id_for(tick: Tick) -> str:
@@ -57,44 +56,6 @@ class TickStore:
         self._conn.close()
 
     def __enter__(self) -> "TickStore":
-        return self
-
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        tb: Optional[TracebackType],
-    ) -> None:
-        self.close()
-
-
-class SignalStore:
-    def __init__(self, conn: psycopg.Connection) -> None:
-        self._conn = conn
-
-    @classmethod
-    def open(cls, dsn: str) -> "SignalStore":
-        return cls(open_connection(dsn))
-
-    def write(self, signal: Signal) -> None:
-        self._conn.execute(
-            "INSERT INTO signals "
-            "(instrument, time, short_ma, long_ma, label) "
-            "VALUES (%s, %s, %s, %s, %s) "
-            "ON CONFLICT (instrument, time) DO NOTHING",
-            (
-                signal.instrument,
-                signal.time,
-                signal.short_ma,
-                signal.long_ma,
-                signal.label,
-            ),
-        )
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> "SignalStore":
         return self
 
     def __exit__(

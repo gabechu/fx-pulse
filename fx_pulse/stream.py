@@ -1,9 +1,8 @@
 """Stream live AUD/USD prices to terminal and persist to Postgres.
 
 Single responsibility: pull ticks from the configured provider, write to
-the `ticks` table, run the heuristic signal, log each row. Model inference
-runs in a separate process (`fx_pulse.predict`) so an ML failure cannot
-stop tick ingest.
+the `ticks` table, log each row. Model inference runs in a separate
+process (`fx_pulse.predict`) so an ML failure cannot stop tick ingest.
 
 Run: `uv run --env-file .env python -m fx_pulse.stream`
 
@@ -19,8 +18,7 @@ import threading
 from fx_pulse import config
 from fx_pulse.obs import Metrics, get_logger, touch_liveness
 from fx_pulse.providers import get_provider
-from fx_pulse.signal import LABEL_WARMUP, MACrossover
-from fx_pulse.storage import SignalStore, TickStore, tick_id_for
+from fx_pulse.storage import TickStore, tick_id_for
 
 log = get_logger("fx_pulse.stream")
 
@@ -35,7 +33,6 @@ def main() -> None:
 
     log.info("streaming starting", extra={"instrument": config.INSTRUMENT})
     metrics = Metrics(logger=log)
-    crossover = MACrossover()
 
     # SIGTERM-driven graceful shutdown: ECS sends SIGTERM on stop, and
     # Python does not translate it to KeyboardInterrupt. The handler sets
@@ -45,7 +42,7 @@ def main() -> None:
     signalmod.signal(signalmod.SIGTERM, lambda _signum, _frame: stop.set())
 
     try:
-        with TickStore.open(dsn) as ticks, SignalStore.open(dsn) as signals:
+        with TickStore.open(dsn) as ticks:
             for tick in provider.stream(
                 [config.INSTRUMENT],
                 on_reconnect=metrics.record_reconnect,
@@ -54,34 +51,16 @@ def main() -> None:
                 tid = tick_id_for(tick)
                 ticks.write(tick, tid, source="live")
                 touch_liveness()
-                signal = crossover.update(tick)
                 metrics.record_tick(tick.time)
-
-                if signal is None:
-                    log.info(
-                        "tick",
-                        extra={
-                            "instrument": tick.instrument,
-                            "time": tick.time,
-                            "bid": tick.bid,
-                            "ask": tick.ask,
-                            "signal": LABEL_WARMUP,
-                        },
-                    )
-                else:
-                    signals.write(signal)
-                    log.info(
-                        "tick",
-                        extra={
-                            "instrument": tick.instrument,
-                            "time": tick.time,
-                            "bid": tick.bid,
-                            "ask": tick.ask,
-                            "signal": signal.label,
-                            "short_ma": signal.short_ma,
-                            "long_ma": signal.long_ma,
-                        },
-                    )
+                log.info(
+                    "tick",
+                    extra={
+                        "instrument": tick.instrument,
+                        "time": tick.time,
+                        "bid": tick.bid,
+                        "ask": tick.ask,
+                    },
+                )
                 metrics.maybe_flush()
     except KeyboardInterrupt:
         pass

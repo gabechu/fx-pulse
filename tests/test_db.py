@@ -52,7 +52,8 @@ def test_open_connection_applies_schema(pg_dsn):
         tables = _tables(conn)
     finally:
         conn.close()
-    assert {"ticks", "signals", "schema_version"} <= tables
+    assert {"ticks", "schema_version"} <= tables
+    assert "signals" not in tables  # dropped in 007_drop_signals
 
 
 def test_migration_failure_rolls_back(pg_dsn, tmp_path, monkeypatch):

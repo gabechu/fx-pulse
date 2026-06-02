@@ -17,49 +17,10 @@
   },
   "panels": [
     {
-      "id": 1,
-      "type": "stat",
-      "title": "Signal",
-      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
-      "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
-      "targets": [
-        {
-          "refId": "A",
-          "format": "table",
-          "rawSql": "SELECT label FROM signals WHERE instrument = 'AUD_USD' ORDER BY time DESC LIMIT 1",
-          "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"}
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "long":  {"text": "LONG",  "color": "green", "index": 0},
-                "short": {"text": "SHORT", "color": "red",   "index": 1},
-                "flat":  {"text": "FLAT",  "color": "text",  "index": 2}
-              }
-            }
-          ],
-          "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}]}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "textMode": "value",
-        "justifyMode": "center",
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
-      }
-    },
-    {
       "id": 2,
       "type": "stat",
       "title": "Rows in window",
-      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
       "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
       "targets": [
         {
@@ -85,7 +46,7 @@
       "id": 3,
       "type": "stat",
       "title": "Latest tick",
-      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
       "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
       "targets": [
         {
@@ -111,7 +72,7 @@
       "id": 4,
       "type": "bargauge",
       "title": "Rows by source",
-      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 4},
       "datasource": {"type": "postgres", "uid": "fx-pulse-postgres"},
       "targets": [
         {

@@ -1,6 +1,6 @@
 """Vendor-agnostic price stream interface.
 
-Anything downstream of a data source (storage, signals, dashboard) should
+Anything downstream of a data source (storage, model, dashboard) should
 import `Tick` and `TickStream` from here — never vendor-specific types.
 """
 from __future__ import annotations

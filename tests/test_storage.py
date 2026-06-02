@@ -1,4 +1,4 @@
-"""Tests for tick + signal persistence — runs against a per-test Postgres schema."""
+"""Tests for tick persistence — runs against a per-test Postgres schema."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -6,8 +6,7 @@ from datetime import datetime, timezone
 import psycopg
 
 from fx_pulse.providers import Tick
-from fx_pulse.signal import Signal
-from fx_pulse.storage import SignalStore, TickStore, tick_id_for
+from fx_pulse.storage import TickStore, tick_id_for
 
 
 def _indexes(conn: psycopg.Connection) -> set[str]:
@@ -36,10 +35,8 @@ def test_open_creates_table_and_index(pg_dsn):
         tables = _tables(conn)
         indexes = _indexes(conn)
     assert "ticks" in tables
-    assert "signals" in tables
     assert "idx_ticks_instrument_time" in indexes
     assert "idx_ticks_tick_id" in indexes
-    assert "idx_signals_instrument_time" in indexes
 
 
 def test_write_persists_tick(pg_dsn):
@@ -89,63 +86,3 @@ def test_write_dedupes_on_repeat_tick_id(pg_dsn):
     with psycopg.connect(pg_dsn) as conn:
         count = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
     assert count == 1
-
-
-def test_signal_store_persists_signal(pg_dsn):
-    s = Signal(
-        instrument="AUD_USD",
-        time="2026-05-21T00:00:00Z",
-        short_ma=0.66012,
-        long_ma=0.66010,
-        label="long",
-    )
-    with SignalStore.open(pg_dsn) as store:
-        store.write(s)
-    with psycopg.connect(pg_dsn) as conn:
-        row = conn.execute(
-            "SELECT instrument, time, short_ma, long_ma, label FROM signals"
-        ).fetchone()
-    assert row == (
-        "AUD_USD",
-        datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc),
-        0.66012,
-        0.66010,
-        "long",
-    )
-
-
-def test_signal_store_dedupes_on_instrument_time(pg_dsn):
-    s = Signal(
-        instrument="AUD_USD",
-        time="2026-05-21T00:00:00Z",
-        short_ma=0.66012,
-        long_ma=0.66010,
-        label="long",
-    )
-    with SignalStore.open(pg_dsn) as store:
-        store.write(s)
-        store.write(s)
-    with psycopg.connect(pg_dsn) as conn:
-        count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
-    assert count == 1
-
-
-def test_tick_store_and_signal_store_share_db(pg_dsn):
-    # Both stores point at the same DB; opening one then the other must leave
-    # both tables intact (i.e. SignalStore.open doesn't clobber ticks).
-    t = Tick(instrument="AUD_USD", time="2026-05-21T00:00:00Z", bid=0.66012, ask=0.66016)
-    s = Signal(
-        instrument="AUD_USD",
-        time="2026-05-21T00:00:00Z",
-        short_ma=0.66014,
-        long_ma=0.66013,
-        label="long",
-    )
-    with TickStore.open(pg_dsn) as ticks, SignalStore.open(pg_dsn) as signals:
-        ticks.write(t, tick_id_for(t), source="live")
-        signals.write(s)
-    with psycopg.connect(pg_dsn) as conn:
-        tick_count = conn.execute("SELECT COUNT(*) FROM ticks").fetchone()[0]
-        signal_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
-    assert tick_count == 1
-    assert signal_count == 1
