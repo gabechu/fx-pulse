@@ -61,8 +61,6 @@ def main() -> None:
                     },
                 )
                 metrics.maybe_flush()
-    except KeyboardInterrupt:
-        pass
     finally:
         metrics.flush()
         log.info("stopped")
