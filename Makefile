@@ -5,7 +5,7 @@ FROM        ?= 2023-05-30T00:00:00Z
 TO          ?= 2026-05-30T00:00:00Z
 GRANULARITY ?= M1
 
-.PHONY: help stream grafana test backfill train-model build teardown
+.PHONY: help stream predict grafana test backfill train-model build teardown
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -13,6 +13,9 @@ help:
 
 stream: ## Run the live tick streamer (rebuilds image)
 	docker compose up --build app
+
+predict: ## Run the per-minute BUY classifier (needs a trained model in data/models)
+	docker compose --profile predict up --build predict
 
 grafana: ## Run Grafana with the provisioned AUD/USD dashboard
 	docker compose up -d grafana

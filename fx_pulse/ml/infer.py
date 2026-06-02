@@ -8,17 +8,16 @@ a decision until SELL is fixed.
 `Predictor.load(model_dir)` returns a Predictor wrapping the calibrated
 buy classifier and its precision-targeted threshold.
 
-`Predictor.predict_at(t)` calls `features.assemble(t)` for one timestamp,
-runs the classifier, returns BUY if buy_proba >= buy_threshold else
-NO_DECISION.
+`Predictor.predict_at(t, conn)` calls `features.assemble(t, conn)` for
+one timestamp, runs the classifier, returns BUY if buy_proba >=
+buy_threshold else NO_DECISION. The caller owns the connection.
 """
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 import joblib
 import pandas as pd
@@ -26,6 +25,8 @@ import psycopg
 
 from fx_pulse.features.assemble import assemble
 
+DECISION_BUY = "BUY"
+DECISION_NONE = "NO_DECISION"
 Decision = Literal["BUY", "NO_DECISION"]
 
 
@@ -67,15 +68,15 @@ class Predictor:
             model_version=meta.get("model_version", "unknown"),
         )
 
-    def predict_at(self, t: pd.Timestamp) -> Prediction:
+    def predict_at(self, t: pd.Timestamp, conn: psycopg.Connection) -> Prediction:
         if t.tz is None:
             raise ValueError("timestamp must be tz-aware")
         timestamps = pd.DatetimeIndex([t])
-        feature_row = assemble(timestamps).iloc[0]
+        feature_row = assemble(timestamps, conn).iloc[0]
         x = feature_row[self._feature_columns].to_numpy().reshape(1, -1)
         buy_p = float(self._buy.predict_proba(x)[0, 1])
         sell_p = float(self._sell.predict_proba(x)[0, 1])
-        decision: Decision = "BUY" if buy_p >= self._buy_threshold else "NO_DECISION"
+        decision: Decision = DECISION_BUY if buy_p >= self._buy_threshold else DECISION_NONE
         return Prediction(
             decision=decision,
             buy_proba=buy_p,
@@ -110,5 +111,3 @@ def write_prediction(
             json.dumps(pred.features_used),
         ),
     )
-
-

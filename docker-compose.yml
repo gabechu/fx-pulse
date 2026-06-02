@@ -21,13 +21,27 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
-      FX_PULSE_MODEL_DIR: /app/data/models
-    volumes:
-      - ./data:/app/data:ro
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+
+  predict:
+    build:
+      context: .
+      target: app
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
+      FX_PULSE_MODEL_DIR: /app/data/models
+    volumes:
+      - ./data:/app/data:ro
+    command: ["uv", "run", "python", "-m", "fx_pulse.predict"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["predict"]  # opt-in: only starts with `--profile predict`
 
   tests:
     build:

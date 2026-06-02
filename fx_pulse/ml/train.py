@@ -4,7 +4,7 @@ Pipeline:
 1. Build a grid of timestamps to evaluate (every TRAIN_STRIDE_MIN minutes
    over the price-data span).
 2. Call `features.assemble(timestamps)` once → wide feature matrix.
-3. Call `features.compute_labels(timestamps)` → forward 30-day-return labels.
+3. Call `ml.label.compute_labels(timestamps)` → forward 30-day-return labels.
 4. Chronological 70/15/15 split with a HORIZON_BARS gap between splits to
    prevent label-leakage across the boundary.
 5. Per-direction HistGradientBoostingClassifier → isotonic calibration on
@@ -12,11 +12,15 @@ Pipeline:
 6. Persist {model.joblib, model_meta.json} so `infer.Predictor` can load.
 
 Train and inference both call the same `assemble()`. Parity by reuse.
+
+To iterate on the model: edit `Hyperparameters` (HGB params) or the
+`DEFAULT_TARGET_PRECISION` / `DEFAULT_TRAIN_STRIDE_MIN` / `MODEL_VERSION`
+constants, then `make train-model`.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +33,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.frozen import FrozenEstimator
 from sklearn.metrics import precision_score, recall_score
 
+from fx_pulse import config
+from fx_pulse.db import open_connection
 from fx_pulse.features import FEATURES
 from fx_pulse.features.assemble import assemble
 from fx_pulse.ml.label import HORIZON_BARS, compute_labels
@@ -38,8 +44,21 @@ log = get_logger(__name__)
 
 DEFAULT_TARGET_PRECISION = 0.90
 DEFAULT_TRAIN_STRIDE_MIN = 15  # evaluate one row every 15 min over history
-DEFAULT_MODEL_DIR = Path(os.environ.get("FX_PULSE_MODEL_DIR", "data/models"))
 MODEL_VERSION = "v2"
+
+
+@dataclass(frozen=True)
+class Hyperparameters:
+    """HistGradientBoostingClassifier knobs. Bump MODEL_VERSION when you change these."""
+    max_iter: int = 400
+    learning_rate: float = 0.05
+    max_leaf_nodes: int = 63
+    min_samples_leaf: int = 200
+    l2_regularization: float = 0.1
+    random_state: int = 0
+
+
+DEFAULT_HYPERPARAMS = Hyperparameters()
 
 
 @dataclass
@@ -60,33 +79,38 @@ class DirectionResult:
 def main(
     target_precision: float = DEFAULT_TARGET_PRECISION,
     train_stride_min: int = DEFAULT_TRAIN_STRIDE_MIN,
-    model_dir: Path = DEFAULT_MODEL_DIR,
+    hyperparams: Hyperparameters = DEFAULT_HYPERPARAMS,
+    model_dir: Path | None = None,
 ) -> None:
-    timestamps = _build_grid(train_stride_min)
-    log.info(
-        "built timestamp grid",
-        extra={
-            "rows": len(timestamps),
-            "first": str(timestamps[0]),
-            "last": str(timestamps[-1]),
-            "stride_min": train_stride_min,
-        },
-    )
+    if model_dir is None:
+        model_dir = config.model_dir()
 
-    log.info("assembling features")
-    features = assemble(timestamps).dropna(how="all")
-    log.info("assembled features", extra={"rows": len(features), "cols": features.shape[1]})
+    with open_connection(config.database_url()) as conn:
+        timestamps = _build_grid(conn, train_stride_min)
+        log.info(
+            "built timestamp grid",
+            extra={
+                "rows": len(timestamps),
+                "first": str(timestamps[0]),
+                "last": str(timestamps[-1]),
+                "stride_min": train_stride_min,
+            },
+        )
 
-    log.info("computing labels")
-    labels = compute_labels(timestamps)
-    log.info(
-        "computed labels",
-        extra={
-            "rows": len(labels),
-            "buy_rate": float(labels["buy"].mean()),
-            "sell_rate": float(labels["sell"].mean()),
-        },
-    )
+        log.info("assembling features")
+        features = assemble(timestamps, conn).dropna(how="all")
+        log.info("assembled features", extra={"rows": len(features), "cols": features.shape[1]})
+
+        log.info("computing labels")
+        labels = compute_labels(timestamps, conn)
+        log.info(
+            "computed labels",
+            extra={
+                "rows": len(labels),
+                "buy_rate": float(labels["buy"].mean()),
+                "sell_rate": float(labels["sell"].mean()),
+            },
+        )
 
     joined = features.join(labels, how="inner").dropna(subset=["buy", "sell"])
     log.info("joined feature+label rows", extra={"rows": len(joined)})
@@ -112,14 +136,7 @@ def main(
         x_test = test[feat_cols].to_numpy()
         y_test = test[direction].to_numpy().astype(int)
 
-        base = HistGradientBoostingClassifier(
-            max_iter=400,
-            learning_rate=0.05,
-            max_leaf_nodes=63,
-            min_samples_leaf=200,
-            l2_regularization=0.1,
-            random_state=0,
-        )
+        base = HistGradientBoostingClassifier(**dataclasses.asdict(hyperparams))
         base.fit(x_train, y_train)
 
         calibrated = CalibratedClassifierCV(FrozenEstimator(base), method="isotonic")
@@ -160,6 +177,7 @@ def main(
         "target_precision": target_precision,
         "train_stride_min": train_stride_min,
         "horizon_bars": HORIZON_BARS,
+        "hyperparams": dataclasses.asdict(hyperparams),
         "results": {d: vars(r) for d, r in results.items()},
         "train_start": str(train.index[0]),
         "train_end": str(train.index[-1]),
@@ -174,13 +192,12 @@ def main(
     _print_report(results, target_precision)
 
 
-def _build_grid(stride_min: int) -> pd.DatetimeIndex:
+def _build_grid(conn: psycopg.Connection, stride_min: int) -> pd.DatetimeIndex:
     """Sample one timestamp every `stride_min` minutes over the AUD/USD span in `ticks`."""
-    dsn = os.environ["DATABASE_URL"]
-    with psycopg.connect(dsn) as conn:
-        row = conn.execute(
-            "SELECT MIN(time), MAX(time) FROM ticks WHERE instrument = 'AUD_USD'"
-        ).fetchone()
+    row = conn.execute(
+        "SELECT MIN(time), MAX(time) FROM ticks WHERE instrument = %s",
+        (config.INSTRUMENT,),
+    ).fetchone()
     first, last = row
     grid = pd.date_range(
         start=pd.Timestamp(first).ceil(f"{stride_min}min"),
