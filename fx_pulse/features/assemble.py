@@ -67,44 +67,8 @@ def _load_oanda_ticks(
     return df.resample("1min").last().dropna()
 
 
-def _load_rba_decisions(
-    conn: psycopg.Connection, start: pd.Timestamp, end: pd.Timestamp
-) -> pd.DataFrame:
-    df = pd.read_sql(
-        "SELECT event_time, rate_pct, change_bps FROM rba_decisions "
-        "WHERE event_time >= %(start)s AND event_time < %(end)s "
-        "ORDER BY event_time",
-        conn,
-        params={"start": start, "end": end},
-        parse_dates=["event_time"],
-    )
-    if not df.empty:
-        df["rate_pct"] = df["rate_pct"].astype(float)
-        df["change_bps"] = df["change_bps"].astype(float)
-    return df
-
-
-def _load_cpi_releases(
-    conn: psycopg.Connection, start: pd.Timestamp, end: pd.Timestamp
-) -> pd.DataFrame:
-    df = pd.read_sql(
-        "SELECT event_time, actual_yoy_pct, forecast_yoy_pct FROM cpi_releases "
-        "WHERE event_time >= %(start)s AND event_time < %(end)s "
-        "ORDER BY event_time",
-        conn,
-        params={"start": start, "end": end},
-        parse_dates=["event_time"],
-    )
-    if not df.empty:
-        df["actual_yoy_pct"] = df["actual_yoy_pct"].astype(float)
-        df["forecast_yoy_pct"] = df["forecast_yoy_pct"].astype(float)
-    return df
-
-
 # Source name → loader. Adding a new external data source = add a loader
 # above and a row here. Feature compute functions read raw[source_name].
 _SOURCE_LOADERS = {
     "oanda_ticks": _load_oanda_ticks,
-    "rba_decisions": _load_rba_decisions,
-    "cpi_releases": _load_cpi_releases,
 }

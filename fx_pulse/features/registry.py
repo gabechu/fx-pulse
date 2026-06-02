@@ -1,9 +1,9 @@
 """FeatureSpec dataclass + global FEATURES registry.
 
 Each feature is a pure function of raw source data plus the timestamps we
-want it evaluated at. Sources are identified by short names ("oanda_ticks",
-"rba_decisions", "cpi_releases"); assemble() loads each requested source
-once and passes it to every feature that needs it.
+want it evaluated at. Sources are identified by short names (currently
+just "oanda_ticks"); assemble() loads each requested source once and
+passes it to every feature that needs it.
 
 A feature's `compute` must be point-in-time correct: for any timestamp t in
 the input, the returned value at t may only depend on rows with
