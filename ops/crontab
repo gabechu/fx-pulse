@@ -13,4 +13,8 @@
 #   2. Add one cron line below.
 #   3. Add a `make <job_name>` target for manual triggers.
 #
-# (No jobs scheduled yet — the framework lands first.)
+# RBA cash-rate-target ingest — 02:05 UTC on the 5th of each month.
+# RBA refreshes the source daily, but cash-rate-target rows only change
+# ~8x/year on decision dates; monthly cadence is plenty and keeps
+# job_runs uncluttered.
+5 2 5 * * uv run python -m fx_pulse.ingest.rba_cash_rate
