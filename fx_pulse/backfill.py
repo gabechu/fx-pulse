@@ -19,7 +19,7 @@ import sys
 
 from fx_pulse import config
 from fx_pulse.obs import get_logger
-from fx_pulse.providers import get_historical
+from fx_pulse.providers import HistoricalSource, get_historical
 from fx_pulse.storage import TickStore, tick_id_for
 
 _PROGRESS_EVERY = 1000
@@ -29,31 +29,27 @@ _BATCH_SIZE = 5000
 log = get_logger("fx_pulse.backfill")
 
 
-def main() -> None:
-    args = _parse_args()
-    try:
-        source = get_historical()
-        dsn = config.database_url()
-    except (RuntimeError, ValueError) as e:
-        log.error("startup failed", extra={"error": str(e)})
-        sys.exit(1)
-    log.info(
-        "backfill starting",
-        extra={
-            "instrument": args.instrument,
-            "granularity": args.granularity,
-            "from": args.start,
-            "to": args.end,
-        },
-    )
+def run(
+    *,
+    source: HistoricalSource,
+    instrument: str,
+    start: str,
+    end: str,
+    granularity: str,
+    dsn: str,
+) -> int:
+    """Backfill candles in [start, end) as ticks. Returns rows written.
+
+    Caller injects `source` and `dsn` so this function is reusable from
+    cron-driven entrypoints (see `fx_pulse.fill_yesterday`) without
+    duplicating the transactional batching loop.
+    """
     written = 0
     with TickStore.open(dsn) as ticks:
         in_batch = 0
         ticks.begin()
         try:
-            for tick in source.fetch(
-                args.instrument, args.start, args.end, args.granularity
-            ):
+            for tick in source.fetch(instrument, start, end, granularity):
                 ticks.write(tick, tick_id_for(tick), source="candle")
                 written += 1
                 in_batch += 1
@@ -73,6 +69,34 @@ def main() -> None:
         except BaseException:
             ticks.rollback()
             raise
+    return written
+
+
+def main() -> None:
+    args = _parse_args()
+    try:
+        source = get_historical()
+        dsn = config.database_url()
+    except (RuntimeError, ValueError) as e:
+        log.error("startup failed", extra={"error": str(e)})
+        sys.exit(1)
+    log.info(
+        "backfill starting",
+        extra={
+            "instrument": args.instrument,
+            "granularity": args.granularity,
+            "from": args.start,
+            "to": args.end,
+        },
+    )
+    written = run(
+        source=source,
+        instrument=args.instrument,
+        start=args.start,
+        end=args.end,
+        granularity=args.granularity,
+        dsn=dsn,
+    )
     log.info("backfill done", extra={"written": written})
 
 
