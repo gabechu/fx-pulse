@@ -12,6 +12,12 @@ COPY pyproject.toml uv.lock README.md ./
 
 FROM base AS app
 RUN uv sync --frozen --no-install-project --no-dev
+# supercronic: small static cron daemon for containers. Used by the scheduler
+# service. ${TARGETARCH} resolves to amd64/arm64 so the same Dockerfile builds
+# on Apple Silicon dev boxes and amd64/arm64 ECS Fargate alike.
+ARG TARGETARCH
+ARG SUPERCRONIC_VERSION=v0.2.29
+ADD --chmod=755 https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH} /usr/local/bin/supercronic
 COPY fx_pulse ./fx_pulse
 RUN uv sync --frozen --no-dev
 CMD ["uv", "run", "python", "-m", "fx_pulse.stream"]

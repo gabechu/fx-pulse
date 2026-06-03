@@ -43,6 +43,26 @@ services:
     restart: unless-stopped
     profiles: ["predict"]  # opt-in: only starts with `--profile predict`
 
+  scheduler:
+    build:
+      context: .
+      target: app
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
+    # supercronic reads ops/crontab and spawns `python -m fx_pulse.<job>`
+    # at scheduled times. Each job persists a row to `job_runs` via
+    # `fx_pulse.jobs.track_run`. On AWS this service is replaced by
+    # EventBridge Scheduler + ECS RunTask; the Python jobs don't change.
+    command: ["supercronic", "/app/ops/crontab"]
+    volumes:
+      - ./ops:/app/ops:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["scheduler"]  # opt-in: only starts with `--profile scheduler`
+
   tests:
     build:
       context: .

@@ -5,7 +5,7 @@ FROM        ?= 2023-05-30T00:00:00Z
 TO          ?= 2026-05-30T00:00:00Z
 GRANULARITY ?= M1
 
-.PHONY: help stream predict grafana test backfill train-model build teardown
+.PHONY: help stream predict grafana test backfill train-model build teardown scheduler scheduler-logs
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -33,6 +33,13 @@ backfill: ## Backfill historical candles. Override: INSTRUMENT=, FROM=, TO=, GRA
 train-model: ## Train the oversold/overbought classifier on tick data in Postgres
 	docker compose run --rm --build -v $(CURDIR)/data:/app/data app \
 		uv run python -m fx_pulse.ml.train
+
+scheduler: ## Run the periodic-job scheduler (supercronic reading ops/crontab)
+	docker compose --profile scheduler up -d --build scheduler
+	@echo "Scheduler up; tail with 'make scheduler-logs'"
+
+scheduler-logs: ## Tail the scheduler container logs
+	docker compose logs -f scheduler
 
 build: ## Rebuild the app image without running anything
 	docker compose build app

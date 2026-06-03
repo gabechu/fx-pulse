@@ -1,0 +1,16 @@
+# Periodic jobs run by the scheduler service (supercronic, see docker-compose.yml).
+#
+# Format: standard 5-field cron + command.
+#   minute  hour  day-of-month  month  day-of-week  command
+# All times are UTC (the container's clock).
+#
+# Each command invokes a Python module that wraps its body in
+# `fx_pulse.jobs.track_run`, so every run is recorded in the `job_runs`
+# table and surfaced on the Grafana dashboard.
+#
+# To add a job:
+#   1. Write fx_pulse/<job_name>.py using `with track_run(conn, "<job_name>"):`.
+#   2. Add one cron line below.
+#   3. Add a `make <job_name>` target for manual triggers.
+#
+# (No jobs scheduled yet — the framework lands first.)
