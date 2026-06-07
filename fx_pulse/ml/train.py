@@ -44,7 +44,7 @@ log = get_logger(__name__)
 
 DEFAULT_TARGET_PRECISION = 0.90
 DEFAULT_TRAIN_STRIDE_MIN = 15  # evaluate one row every 15 min over history
-MODEL_VERSION = "v2"
+MODEL_VERSION = "v3"
 
 
 @dataclass(frozen=True)
