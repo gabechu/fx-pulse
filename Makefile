@@ -5,7 +5,7 @@ FROM        ?= 2023-05-30T00:00:00Z
 TO          ?= 2026-05-30T00:00:00Z
 GRANULARITY ?= M1
 
-.PHONY: help stream predict grafana test backfill train-model build teardown scheduler scheduler-logs ingest-rba fill-yesterday
+.PHONY: help stream predict grafana test backfill train-model build teardown scheduler scheduler-logs ingest-rba fill-day
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -37,8 +37,8 @@ train-model: ## Train the oversold/overbought classifier on tick data in Postgre
 ingest-rba: ## Manually run the RBA cash-rate ingest (writes rba_cash_rate + job_runs)
 	docker compose run --rm --build app uv run python -m fx_pulse.ingest.rba_cash_rate
 
-fill-yesterday: ## Manually run the daily S5 backfill for yesterday's UTC window
-	docker compose run --rm --build app uv run python -m fx_pulse.fill_yesterday
+fill-day: ## Manually run the S5 backfill for one UTC day. Default: yesterday. Override: DATE=YYYY-MM-DD
+	docker compose run --rm --build app uv run python -m fx_pulse.fill_day $(if $(DATE),--date $(DATE))
 
 scheduler: ## Run the periodic-job scheduler (supercronic reading ops/crontab)
 	docker compose --profile scheduler up -d --build scheduler

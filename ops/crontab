@@ -14,9 +14,10 @@
 #   3. Add a `make <job_name>` target for manual triggers.
 #
 # Daily catch-up backfill for yesterday's UTC window at S5 (5-second)
-# candles. Idempotent against the live streamer via tick_id ON CONFLICT,
-# so safe even when the streamer covered the same window.
-30 1 * * * uv run python -m fx_pulse.fill_yesterday
+# candles. With no `--date`, fill_day defaults to yesterday UTC.
+# Idempotent against the live streamer via tick_id ON CONFLICT, so safe
+# even when the streamer covered the same window.
+30 1 * * * uv run python -m fx_pulse.fill_day
 
 # RBA cash-rate-target ingest — 02:05 UTC on the 5th of each month.
 # RBA refreshes the source daily, but cash-rate-target rows only change

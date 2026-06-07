@@ -41,7 +41,7 @@ def run(
     """Backfill candles in [start, end) as ticks. Returns rows written.
 
     Caller injects `source` and `dsn` so this function is reusable from
-    cron-driven entrypoints (see `fx_pulse.fill_yesterday`) without
+    cron-driven entrypoints (see `fx_pulse.fill_day`) without
     duplicating the transactional batching loop.
     """
     written = 0
