@@ -39,7 +39,7 @@ Importing each feature submodule has the side effect of registering its
 features. Add a `from fx_pulse.features import <new_module>` line below
 when you add one.
 """
-from fx_pulse.features import price  # noqa: F401 — side-effect import
+from fx_pulse.features import price, rates  # noqa: F401 — side-effect imports
 from fx_pulse.features.registry import FEATURES, FeatureSpec
 
 __all__ = ["FEATURES", "FeatureSpec"]

@@ -67,8 +67,31 @@ def _load_oanda_ticks(
     return df.resample("1min").last().dropna()
 
 
+def _load_rba_cash_rate(
+    conn: psycopg.Connection, start: pd.Timestamp, end: pd.Timestamp
+) -> pd.DataFrame:
+    """RBA cash-rate target as a daily, tz-aware DataFrame (business days only).
+
+    Indexed at date 00:00 UTC; `cash_rate_target` is the prevailing rate and
+    `change_in_cash_rate_target` is non-null only on decision days. Features
+    ffill from this, so a timestamp picks up the most recent published rate.
+    (Decisions are announced intraday; at daily granularity against a 30-day
+    label that few-hour offset is immaterial.)
+    """
+    df = pd.read_sql(
+        "SELECT date, cash_rate_target, change_in_cash_rate_target FROM rba_cash_rate "
+        "WHERE date >= %(start)s AND date < %(end)s ORDER BY date",
+        conn,
+        params={"start": start.date(), "end": end.date()},
+        parse_dates=["date"],
+    )
+    df["date"] = pd.to_datetime(df["date"], utc=True)
+    return df.set_index("date")
+
+
 # Source name → loader. Adding a new external data source = add a loader
 # above and a row here. Feature compute functions read raw[source_name].
 _SOURCE_LOADERS = {
     "oanda_ticks": _load_oanda_ticks,
+    "rba_cash_rate": _load_rba_cash_rate,
 }
