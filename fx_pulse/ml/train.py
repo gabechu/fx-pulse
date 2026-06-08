@@ -44,7 +44,7 @@ log = get_logger(__name__)
 
 DEFAULT_TARGET_PRECISION = 0.90
 DEFAULT_TRAIN_STRIDE_MIN = 15  # evaluate one row every 15 min over history
-MODEL_VERSION = "v3"
+MODEL_VERSION = "v4"
 
 
 @dataclass(frozen=True)
@@ -193,7 +193,15 @@ def main(
 
 
 def _build_grid(conn: psycopg.Connection, stride_min: int) -> pd.DatetimeIndex:
-    """Sample one timestamp every `stride_min` minutes over the AUD/USD span in `ticks`."""
+    """Sample one timestamp every `stride_min` minutes over the AUD/USD span in `ticks`.
+
+    Weekends (Sat/Sun UTC) are excluded: FX is closed, so a weekend grid
+    timestamp would ffill features and labels from Friday's close,
+    producing many duplicate training rows that bias the loss, val/test
+    metrics, threshold selection, and calibration. Sunday-evening reopen
+    is accepted as collateral; a stricter "fresh tick within X minutes"
+    filter is the principled fix if we ever need it.
+    """
     row = conn.execute(
         "SELECT MIN(time), MAX(time) FROM ticks WHERE instrument = %s",
         (config.INSTRUMENT,),
@@ -205,7 +213,7 @@ def _build_grid(conn: psycopg.Connection, stride_min: int) -> pd.DatetimeIndex:
         freq=f"{stride_min}min",
         tz="UTC",
     )
-    return grid
+    return grid[grid.dayofweek < 5]
 
 
 def _time_split(
