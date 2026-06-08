@@ -147,7 +147,7 @@ def main(
         y_val = val[direction].to_numpy().astype(int)
         y_test = test[direction].to_numpy().astype(int)
 
-        calibrated, threshold = _fit_head(
+        calibrated, threshold, _ = _fit_head(
             train[feat_cols].to_numpy(),
             y_train,
             val[feat_cols].to_numpy(),
@@ -301,11 +301,16 @@ def _fit_head(
     y_cal: np.ndarray,
     target_precision: float,
     hyperparams: Hyperparameters,
-) -> tuple[CalibratedClassifierCV, float]:
+) -> tuple[CalibratedClassifierCV, float, HistGradientBoostingClassifier]:
     """Fit HGB on the fit slice, isotonic-calibrate on the cal slice, pick a
     precision-targeted threshold on the cal slice. The single producer of a
     (model, threshold) pair — used by both the shipped split and every
     walk-forward fold so the two never drift apart.
+
+    Also returns the uncalibrated base: isotonic produces large tie plateaus,
+    so ranking by calibrated proba is unsafe for top-k diagnostics (argsort
+    breaks ties by row order, collapsing the top-k onto a contiguous time
+    block). The base's raw scores are tie-free and the faithful ranking.
     """
     base = HistGradientBoostingClassifier(**dataclasses.asdict(hyperparams))
     base.fit(x_fit, y_fit)
@@ -314,7 +319,7 @@ def _fit_head(
     cal_proba = calibrated.predict_proba(x_cal)[:, 1]
     min_signals = max(200, int(DEFAULT_MIN_SIGNAL_RATE * len(y_cal)))
     threshold = _pick_threshold(y_cal, cal_proba, target_precision, min_signals)
-    return calibrated, threshold
+    return calibrated, threshold, base
 
 
 def _eval_head(
@@ -385,7 +390,7 @@ def _walk_forward_eval(
         cal = joined.iloc[cal_start:cal_end]
         test = joined.iloc[test_start:test_end]
         for direction in ("buy", "sell"):
-            model, threshold = _fit_head(
+            model, threshold, base = _fit_head(
                 fit[feat_cols].to_numpy(),
                 fit[direction].to_numpy().astype(int),
                 cal[feat_cols].to_numpy(),
@@ -393,12 +398,13 @@ def _walk_forward_eval(
                 target_precision,
                 hyperparams,
             )
+            x_test = test[feat_cols].to_numpy()
             y_test = test[direction].to_numpy().astype(int)
-            test_proba = model.predict_proba(test[feat_cols].to_numpy())[:, 1]
-            pred = test_proba >= threshold
+            pred = model.predict_proba(x_test)[:, 1] >= threshold
             prec, rec, sig = _safe_precision(y_test, pred), _safe_recall(y_test, pred), float(pred.mean())
+            # rank by raw base scores (tie-free), not calibrated proba — see _fit_head
             budget = max(1, int(DEFAULT_MIN_SIGNAL_RATE * len(y_test)))
-            top = np.argsort(test_proba)[::-1][:budget]
+            top = np.argsort(base.predict_proba(x_test)[:, 1])[::-1][:budget]
             out[direction].append(FoldResult(
                 fold=i,
                 threshold=float(threshold),
