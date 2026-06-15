@@ -34,8 +34,8 @@ def main() -> None:
     log.info("streaming starting", extra={"instrument": config.INSTRUMENT})
     metrics = Metrics(logger=log)
 
-    # SIGTERM-driven graceful shutdown: ECS sends SIGTERM on stop, and
-    # Python does not translate it to KeyboardInterrupt. The handler sets
+    # SIGTERM-driven graceful shutdown: container orchestrators send SIGTERM
+    # on stop, and Python does not translate it to KeyboardInterrupt. The handler sets
     # the event; the provider checks it at loop top and uses it as an
     # interruptible sleep so we don't sit out a 30s backoff before exiting.
     stop = threading.Event()

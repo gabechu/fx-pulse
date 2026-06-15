@@ -80,7 +80,3 @@ Offline suite — no network, no vendor calls.
 - [x] Step 3 — Persist ticks to Postgres
 - [x] Step 4 — First heuristic signal
 - [x] Step 5 — Grafana dashboard
-- [ ] Step 6 — Phone access (LAN / tunnel)
-
-Production-readiness work (reconnect/backoff, SIGTERM, config consolidation,
-etc.) is tracked separately in [BACKLOG.md](BACKLOG.md).

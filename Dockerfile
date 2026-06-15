@@ -14,7 +14,7 @@ FROM base AS app
 RUN uv sync --frozen --no-install-project --no-dev
 # supercronic: small static cron daemon for containers. Used by the scheduler
 # service. ${TARGETARCH} resolves to amd64/arm64 so the same Dockerfile builds
-# on Apple Silicon dev boxes and amd64/arm64 ECS Fargate alike.
+# across architectures (e.g. Apple Silicon dev boxes and amd64/arm64 servers).
 ARG TARGETARCH
 ARG SUPERCRONIC_VERSION=v0.2.29
 ADD --chmod=755 https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH} /usr/local/bin/supercronic

@@ -52,8 +52,8 @@ services:
       DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
     # supercronic reads ops/crontab and spawns `python -m fx_pulse.<job>`
     # at scheduled times. Each job persists a row to `job_runs` via
-    # `fx_pulse.jobs.track_run`. On AWS this service is replaced by
-    # EventBridge Scheduler + ECS RunTask; the Python jobs don't change.
+    # `fx_pulse.jobs.track_run`. In a managed environment this service can be
+    # replaced by a scheduled task runner; the Python jobs don't change.
     command: ["supercronic", "/app/ops/crontab"]
     volumes:
       - ./ops:/app/ops:ro
