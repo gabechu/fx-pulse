@@ -1,9 +1,10 @@
-"""Per-minute BUY classifier driver.
+"""Per-minute hybrid BUY decision driver.
 
-Runs in its own process so an ML failure (broken artifact, feature load
-error, slow query) cannot interfere with the live tick streamer. Wakes
-shortly after each UTC minute boundary, calls
-`Predictor.predict_at(boundary, conn)`, writes one prediction row.
+Runs in its own process so a prediction failure (broken artifact, feature
+load error, slow query) cannot interfere with the live tick streamer.
+Wakes shortly after each UTC minute boundary, calls
+`Predictor.predict_at(boundary, conn)` — rule heads decide, the ML head
+shadows (see `fx_pulse.ml.infer`) — and writes one prediction row.
 
 Run: `uv run --env-file .env python -m fx_pulse.predict`
 
@@ -104,8 +105,10 @@ def _predict_once(
             extra={
                 "feature_at": boundary.isoformat(),
                 "decision": pred.decision,
-                "buy_proba": pred.buy_proba,
-                "sell_proba": pred.sell_proba,
+                "decision_source": pred.decision_source,
+                "buy_raw_score": pred.buy_raw_score,
+                "ml_buy_threshold": pred.ml_buy_threshold,
+                "ml_buy_signal": pred.ml_buy_signal,
                 "model_version": predictor.model_version,
             },
         )

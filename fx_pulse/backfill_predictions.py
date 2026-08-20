@@ -47,7 +47,11 @@ def run(
         if features.empty:
             log.info("no data in chunk", extra={"from": str(chunk_start)})
             continue
-        predictions = predictor.predict_frame(features)
+        # One shadow threshold per day-chunk: the trailing 42-day quantile
+        # moves too slowly for per-minute recomputation to matter, and a
+        # sequential backfill bootstraps it from the chunks it already wrote.
+        ml_buy_threshold = predictor.ml_buy_threshold_at(chunk_start, conn)
+        predictions = predictor.predict_frame(features, ml_buy_threshold)
         with conn.transaction():
             for t, pred in zip(features.index, predictions):
                 write_prediction(
@@ -65,6 +69,7 @@ def run(
                 "from": str(chunk_start),
                 "rows": len(predictions),
                 "buys": sum(p.decision == "BUY" for p in predictions),
+                "ml_shadow_signals": sum(p.ml_buy_signal for p in predictions),
                 "written_total": written,
             },
         )
