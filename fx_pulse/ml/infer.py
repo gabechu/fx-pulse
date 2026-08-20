@@ -11,6 +11,10 @@ buy classifier and its precision-targeted threshold.
 `Predictor.predict_at(t, conn)` calls `features.assemble(t, conn)` for
 one timestamp, runs the classifier, returns BUY if buy_proba >=
 buy_threshold else NO_DECISION. The caller owns the connection.
+
+`Predictor.predict_frame(features)` scores an already-assembled frame, so
+a backfill can assemble many timestamps in one query instead of one per
+minute.
 """
 from __future__ import annotations
 
@@ -71,18 +75,27 @@ class Predictor:
     def predict_at(self, t: pd.Timestamp, conn: psycopg.Connection) -> Prediction:
         if t.tz is None:
             raise ValueError("timestamp must be tz-aware")
-        timestamps = pd.DatetimeIndex([t])
-        feature_row = assemble(timestamps, conn).iloc[0]
-        x = feature_row[self._feature_columns].to_numpy().reshape(1, -1)
-        buy_p = float(self._buy.predict_proba(x)[0, 1])
-        sell_p = float(self._sell.predict_proba(x)[0, 1])
-        decision: Decision = DECISION_BUY if buy_p >= self._buy_threshold else DECISION_NONE
-        return Prediction(
-            decision=decision,
-            buy_proba=buy_p,
-            sell_proba=sell_p,
-            features_used={k: (None if pd.isna(v) else float(v)) for k, v in feature_row.items()},
-        )
+        return self.predict_frame(assemble(pd.DatetimeIndex([t]), conn))[0]
+
+    def predict_frame(self, features: pd.DataFrame) -> list[Prediction]:
+        if features.empty:
+            return []
+        x = features[self._feature_columns].to_numpy()
+        buy_probas = self._buy.predict_proba(x)[:, 1]
+        sell_probas = self._sell.predict_proba(x)[:, 1]
+        return [
+            Prediction(
+                decision=DECISION_BUY if buy_p >= self._buy_threshold else DECISION_NONE,
+                buy_proba=float(buy_p),
+                sell_proba=float(sell_p),
+                features_used={
+                    k: (None if pd.isna(v) else float(v)) for k, v in row.items()
+                },
+            )
+            for (_, row), buy_p, sell_p in zip(
+                features.iterrows(), buy_probas, sell_probas
+            )
+        ]
 
 
 def write_prediction(

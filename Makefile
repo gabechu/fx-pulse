@@ -5,17 +5,17 @@ FROM        ?= 2023-05-30T00:00:00Z
 TO          ?= 2026-05-30T00:00:00Z
 GRANULARITY ?= M1
 
-.PHONY: help stream predict grafana test backfill train-model build teardown scheduler scheduler-logs ingest-rba fill-day
+.PHONY: help app predict grafana test backfill backfill-predictions train-model build teardown scheduler scheduler-logs ingest-rba fill-day
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  %-12s %s\n", $$1, $$2}'
 
-stream: ## Run the live tick streamer (rebuilds image)
+app: grafana predict
 	docker compose up --build app
 
 predict: ## Run the per-minute BUY classifier (needs a trained model in data/models)
-	docker compose --profile predict up --build predict
+	docker compose --profile predict up -d --build predict
 
 grafana: ## Run Grafana with the provisioned AUD/USD dashboard
 	docker compose up -d grafana
@@ -39,6 +39,11 @@ ingest-rba: ## Manually run the RBA cash-rate ingest (writes rba_cash_rate + job
 
 fill-day: ## Manually run the S5 backfill for one UTC day. Default: yesterday. Override: DATE=YYYY-MM-DD
 	docker compose run --rm --build app uv run python -m fx_pulse.fill_day $(if $(DATE),--date $(DATE))
+
+backfill-predictions: ## Backfill predictions. Requires SINCE=RFC3339; UNTIL= defaults to now
+	docker compose run --rm --build -v $(CURDIR)/data:/app/data:ro app \
+		uv run python -m fx_pulse.backfill_predictions \
+		--from $(SINCE) $(if $(UNTIL),--to $(UNTIL))
 
 scheduler: ## Run the periodic-job scheduler (supercronic reading ops/crontab)
 	docker compose --profile scheduler up -d --build scheduler
