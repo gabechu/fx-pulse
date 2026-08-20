@@ -1,13 +1,18 @@
-"""Point-in-time feature assembly.
+"""Point-in-time feature assembly on a Hamilton DAG.
 
 `assemble(timestamps, conn, [feature_names])` returns a DataFrame indexed
 by `timestamps` with one column per requested feature (default: all).
 The exact same call shape works for training (1M+ historical timestamps)
-and online serving (one current timestamp).
+and online serving (one current timestamp) — train/serve parity by
+construction.
 
-Loads each needed source once from Postgres, sliced to
-`[min(timestamps) - max_lookback, max(timestamps)]`, then dispatches to each
-feature's `compute` function.
+Feature functions (`price.py`, `rates.py`) map full-history source data
+to full-history series. This module loads each source the requested
+features need once from Postgres, sliced to
+`[min(timestamps) - lookback, max(timestamps)]`, runs the DAG, and
+samples every output at `timestamps` with a backward fill. That sampling
+is the point-in-time rule: the value at t reflects only source rows at or
+before t, and a t before the first row is NaN ("we knew nothing yet").
 
 The caller owns the connection (open it via `fx_pulse.db.open_connection`
 and pass it in). That keeps this layer unit-testable with a stub
@@ -20,37 +25,13 @@ from typing import Iterable, Optional
 
 import pandas as pd
 import psycopg
+from hamilton import base, driver
 
 from fx_pulse import config
-from fx_pulse.features.registry import FEATURES, RawData
+from fx_pulse.features import price, rates
 
 
-def assemble(
-    timestamps: pd.DatetimeIndex,
-    conn: psycopg.Connection,
-    feature_names: Optional[Iterable[str]] = None,
-) -> pd.DataFrame:
-    """Materialise features for the given timestamps."""
-    if timestamps.tz is None:
-        raise ValueError("timestamps must be tz-aware (UTC recommended)")
-    names = list(feature_names) if feature_names is not None else list(FEATURES)
-    specs = [FEATURES[n] for n in names]
-
-    sources_needed = {s.source for s in specs}
-    max_lookback_by_source = {
-        src: max(s.lookback for s in specs if s.source == src) for src in sources_needed
-    }
-
-    raw: RawData = {}
-    for src, lookback in max_lookback_by_source.items():
-        start = timestamps.min() - lookback
-        end = timestamps.max() + pd.Timedelta(seconds=1)
-        raw[src] = _SOURCE_LOADERS[src](conn, start, end)
-
-    return pd.DataFrame({s.name: s.compute(timestamps, raw) for s in specs}, index=timestamps)
-
-
-def _load_oanda_ticks(
+def _load_mid(
     conn: psycopg.Connection, start: pd.Timestamp, end: pd.Timestamp
 ) -> pd.Series:
     """1-min mid-price Series, indexed by minute, no forward-fill across gaps."""
@@ -89,9 +70,49 @@ def _load_rba_cash_rate(
     return df.set_index("date")
 
 
-# Source name → loader. Adding a new external data source = add a loader
-# above and a row here. Feature compute functions read raw[source_name].
-_SOURCE_LOADERS = {
-    "oanda_ticks": _load_oanda_ticks,
-    "rba_cash_rate": _load_rba_cash_rate,
+# DAG input node → (loader, history loaded before the earliest timestamp).
+# Keep each lookback >= the longest feature window on that source; the
+# rba one also covers long policy holds + the 90d momentum window.
+# Adding a data source = add a loader above and a row here; feature
+# functions take it as a parameter named after the input node.
+_SOURCES = {
+    "mid": (_load_mid, pd.Timedelta(minutes=3 * price.YEAR)),
+    "rba_cash_rate": (_load_rba_cash_rate, pd.Timedelta(days=800)),
 }
+
+_driver = (
+    driver.Builder()
+    .with_modules(price, rates)
+    .with_adapter(base.SimplePythonGraphAdapter(base.DictResult()))
+    .build()
+)
+
+FEATURES: dict[str, str] = {
+    v.name: v.documentation or ""
+    for v in sorted(_driver.list_available_variables(), key=lambda v: v.name)
+    if not v.is_external_input
+}
+
+
+def assemble(
+    timestamps: pd.DatetimeIndex,
+    conn: psycopg.Connection,
+    feature_names: Optional[Iterable[str]] = None,
+) -> pd.DataFrame:
+    """Materialise features for the given timestamps."""
+    if timestamps.tz is None:
+        raise ValueError("timestamps must be tz-aware (UTC recommended)")
+    names = list(feature_names) if feature_names is not None else list(FEATURES)
+
+    end = timestamps.max() + pd.Timedelta(seconds=1)
+    inputs = {}
+    for v in _driver.what_is_upstream_of(*names):
+        if v.is_external_input:
+            loader, lookback = _SOURCES[v.name]
+            inputs[v.name] = loader(conn, timestamps.min() - lookback, end)
+
+    outputs = _driver.execute(names, inputs=inputs)
+    return pd.DataFrame(
+        {name: outputs[name].reindex(timestamps, method="ffill") for name in names},
+        index=timestamps,
+    )
