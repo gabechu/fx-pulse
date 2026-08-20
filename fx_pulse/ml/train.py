@@ -11,6 +11,10 @@ Pipeline:
    the val slice → smallest val threshold meeting target precision.
 6. Persist {model.joblib, model_meta.json} so `infer.Predictor` can load.
 
+The absolute thresholds recorded here are training diagnostics: serving
+decisions come from rule heads, with the ML head in shadow behind an
+adaptive quantile threshold (see `fx_pulse.ml.infer`).
+
 Train and inference both call the same `assemble()`. Parity by reuse.
 
 To iterate on the model: edit `Hyperparameters` (HGB params) or the
@@ -57,7 +61,7 @@ DEFAULT_MIN_SIGNAL_RATE = 0.02
 # from the single shipped split). More folds = lower-variance estimate but each
 # refits both heads, so cost scales linearly.
 DEFAULT_WALK_FORWARD_FOLDS = 4
-MODEL_VERSION = "v5"
+MODEL_VERSION = "v6"
 
 
 @dataclass(frozen=True)
