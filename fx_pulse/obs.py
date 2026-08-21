@@ -28,18 +28,38 @@ _BUILTIN_LOGRECORD_ATTRS = set(
 ) | {"message", "asctime"}
 
 
+_MAX_LOG_FIELD_CHARS = 500
+
+
+def _bound(text: str) -> str:
+    """Keep log fields single-line-sized regardless of who logged them.
+
+    Vendor libraries (oandapyV20 among them) log entire HTTP response
+    bodies on failure — during an OANDA outage that is a ~24KB HTML error
+    page per retry. Markup is elided from the first tag so the useful
+    prefix (URL, status code) survives; anything else is truncated.
+    """
+    lower = text.lower()
+    idx = min((i for i in (lower.find("<!doctype"), lower.find("<html")) if i != -1), default=-1)
+    if idx != -1:
+        text = f"{text[:idx].rstrip()} [{len(text) - idx} chars of html elided]"
+    if len(text) > _MAX_LOG_FIELD_CHARS:
+        text = f"{text[:_MAX_LOG_FIELD_CHARS]}... [{len(text) - _MAX_LOG_FIELD_CHARS} chars truncated]"
+    return text
+
+
 class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, object] = {
             "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "msg": record.getMessage(),
+            "msg": _bound(record.getMessage()),
         }
         for key, val in record.__dict__.items():
             if key in _BUILTIN_LOGRECORD_ATTRS or key.startswith("_"):
                 continue
-            payload[key] = val
+            payload[key] = _bound(val) if isinstance(val, str) else val
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
         return json.dumps(payload, default=str)
