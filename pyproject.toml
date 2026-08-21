@@ -20,7 +20,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "apache-hamilton[ui]>=1.90.0",
     "pytest>=8.0",
+    "sf-hamilton-sdk>=0.9.0",
 ]
 
 [build-system]
