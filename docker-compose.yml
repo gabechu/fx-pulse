@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: fx_pulse
       POSTGRES_DB: fx_pulse
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Bind mount, not a named volume: the database travels with the repo
+      # folder and survives any `docker ... prune`.
+      - ./data/pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fx_pulse -d fx_pulse"]
       interval: 2s
@@ -63,14 +65,31 @@ services:
     restart: unless-stopped
     profiles: ["scheduler"]  # opt-in: only starts with `--profile scheduler`
 
+  # Throwaway database for the test suite: tmpfs-backed, no volume, its data
+  # dies with the container. Tests must never see the real database.
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fx_pulse
+      POSTGRES_PASSWORD: fx_pulse
+      POSTGRES_DB: fx_pulse
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fx_pulse -d fx_pulse"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    profiles: ["test"]
+
   tests:
     build:
       context: .
       target: dev
     environment:
-      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres:5432/fx_pulse
+      DATABASE_URL: postgresql://fx_pulse:fx_pulse@postgres-test:5432/fx_pulse
     depends_on:
-      postgres:
+      postgres-test:
         condition: service_healthy
     profiles: ["test"]
 
@@ -94,5 +113,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  pgdata:
   grafana-data:
