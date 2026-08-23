@@ -9,6 +9,7 @@ venv/
 .uv-cache/
 
 # Data
+backups/
 *.db
 *.sqlite
 *.sqlite3

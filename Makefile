@@ -5,7 +5,7 @@ FROM        ?= 2023-05-30T00:00:00Z
 TO          ?= 2026-05-30T00:00:00Z
 GRANULARITY ?= M1
 
-.PHONY: help app predict grafana test backfill backfill-predictions train-model build stop teardown scheduler scheduler-logs ingest-rba fill-day
+.PHONY: help app predict grafana test backfill backfill-predictions train-model build stop teardown backup scheduler scheduler-logs ingest-rba fill-day
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -56,7 +56,15 @@ build: ## Rebuild the app image without running anything
 	docker compose build app
 
 stop: ## Stop and remove all containers, including profiled services (keeps data volumes)
-	docker compose --profile predict --profile scheduler down --remove-orphans
+	docker compose --profile predict --profile scheduler --profile test down --remove-orphans
 
-teardown: ## Stop all services and wipe the Postgres volume (clean slate)
-	docker compose --profile predict --profile scheduler down -v --remove-orphans
+backup: ## Dump the database to backups/ (starts postgres if needed)
+	@mkdir -p backups
+	docker compose up -d postgres
+	docker compose exec postgres pg_dump -U fx_pulse -Fc fx_pulse \
+		> backups/fx_pulse_$$(date +%Y%m%d_%H%M%S).dump
+	@ls -lh backups/ | tail -1
+
+teardown: ## Stop all services and wipe the database (clean slate)
+	docker compose --profile predict --profile scheduler --profile test down -v --remove-orphans
+	rm -rf data/pgdata
