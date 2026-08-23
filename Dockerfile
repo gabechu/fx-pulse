@@ -20,7 +20,9 @@ ARG SUPERCRONIC_VERSION=v0.2.29
 ADD --chmod=755 https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH} /usr/local/bin/supercronic
 COPY fx_pulse ./fx_pulse
 RUN uv sync --frozen --no-dev
-CMD ["uv", "run", "python", "-m", "fx_pulse.stream"]
+# Run the venv python directly so it is PID 1 and receives docker stop's
+# SIGTERM; `uv run` as PID 1 does not forward signals to its child.
+CMD ["/app/.venv/bin/python", "-m", "fx_pulse.stream"]
 
 FROM base AS dev
 RUN uv sync --frozen --no-install-project
