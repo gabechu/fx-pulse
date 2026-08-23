@@ -57,9 +57,11 @@ class OandaTickStream:
         attempt = 0
         while not _stopped(stop):
             try:
-                for tick in self._open_once(instruments):
+                for tick in self._open_once(instruments, stop):
                     attempt = 0  # any yielded tick proves the connection is alive
                     yield tick
+                if _stopped(stop):
+                    return
                 log.warning("OANDA stream closed cleanly; reconnecting")
             except Exception as exc:
                 if not _is_retryable(exc):
@@ -75,10 +77,17 @@ class OandaTickStream:
                 return
             attempt += 1
 
-    def _open_once(self, instruments: Iterable[str]) -> Iterator[Tick]:
+    def _open_once(
+        self, instruments: Iterable[str], stop: Optional[threading.Event] = None
+    ) -> Iterator[Tick]:
         params = {"instruments": ",".join(instruments)}
         request = PricingStream(accountID=self._account_id, params=params)
+        # Check `stop` on every message, not just PRICE: OANDA heartbeats
+        # every ~5s, so SIGTERM exits promptly even when the market is closed
+        # and no ticks arrive.
         for msg in self._api.request(request):
+            if _stopped(stop):
+                return
             if msg.get("type") != "PRICE":
                 continue
             yield Tick(

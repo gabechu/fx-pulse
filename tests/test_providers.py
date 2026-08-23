@@ -138,3 +138,26 @@ def test_oanda_stream_stops_when_event_set_during_backoff(monkeypatch):
     ticks = list(adapter.stream(["AUD_USD"], stop=stop))
     assert ticks == []
     assert stop.is_set()
+
+
+def test_oanda_stream_stops_on_heartbeat_when_market_closed():
+    # SIGTERM while the market is closed: no PRICE messages arrive, only
+    # heartbeats. The stream must notice `stop` on the next heartbeat instead
+    # of blocking until the next tick.
+    stop = threading.Event()
+
+    def heartbeats_forever():
+        yield _price_msg("2026-08-21T20:59:05.141866467Z", "0.71684", "0.71726")
+        stop.set()
+        while True:
+            yield {"type": "HEARTBEAT"}
+
+    class FakeAPI:
+        def request(self, _req):
+            return heartbeats_forever()
+
+    adapter = OandaTickStream(token="x", account_id="y")
+    adapter._api = FakeAPI()
+
+    ticks = list(adapter.stream(["AUD_USD"], stop=stop))
+    assert [t.bid for t in ticks] == [0.71684]
