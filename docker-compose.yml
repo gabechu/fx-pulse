@@ -36,7 +36,7 @@ services:
       FX_PULSE_MODEL_DIR: /app/data/models
     volumes:
       - ./data:/app/data:ro
-    command: ["uv", "run", "python", "-m", "fx_pulse.predict"]
+    command: ["/app/.venv/bin/python", "-m", "fx_pulse.predict"]
     depends_on:
       postgres:
         condition: service_healthy
