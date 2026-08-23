@@ -22,7 +22,7 @@ grafana: ## Run Grafana with the provisioned AUD/USD dashboard
 	@echo "Grafana up at http://localhost:3000  (anonymous viewer; admin/admin to edit)"
 
 test: ## Run the offline test suite
-	docker compose run --rm tests
+	docker compose run --rm --build tests
 
 backfill: ## Backfill historical candles. Override: INSTRUMENT=, FROM=, TO=, GRANULARITY=
 	docker compose run --rm --build app uv run python -m fx_pulse.backfill \

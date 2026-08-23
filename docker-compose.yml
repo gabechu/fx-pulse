@@ -14,6 +14,9 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+    # Explicit grace periods everywhere: this host's Docker stamps a 1s stop
+    # timeout on containers by default, which SIGKILLs mid-shutdown.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   app:
@@ -26,6 +29,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # SIGTERM exit rides the OANDA heartbeat cadence (~5s when market closed)
+    stop_grace_period: 15s
     restart: unless-stopped
 
   predict:
@@ -42,6 +47,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    stop_grace_period: 15s
     restart: unless-stopped
     profiles: ["predict"]  # opt-in: only starts with `--profile predict`
 
@@ -62,6 +68,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    stop_grace_period: 30s
     restart: unless-stopped
     profiles: ["scheduler"]  # opt-in: only starts with `--profile scheduler`
 
@@ -110,6 +117,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    stop_grace_period: 10s
     restart: unless-stopped
 
 volumes:
